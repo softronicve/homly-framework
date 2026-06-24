@@ -1,0 +1,15 @@
+{
+  "name": "homly-framework",
+  "version": "0.1.0",
+  "description": "Micro-framework de Web Components con reactividad por señales. Vanilla JS, sin dependencias ni build.",
+  "type": "module",
+  "main": "homly.js",
+  "exports": "./homly.js",
+  "files": ["homly.js"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/softronicve/homly-framework.git"
+  },
+  "keywords": ["web-components", "vanilla-js", "signals", "reactive", "no-build"]
+}
