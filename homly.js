@@ -1,6 +1,7 @@
 /**
  * homly.js — micro-framework de Web Components con reactividad por señales.
  * Sin dependencias, sin build.
+ * @version 1.0.0
  */
 
 export class Homly {
@@ -94,6 +95,25 @@ export class Homly {
         }, signal);
       }
     });
+
+    // Two-way binding: data-model="clave" (input / textarea / select / checkbox).
+    container.querySelectorAll('[data-model]').forEach(el => {
+      const key = el.getAttribute('data-model');
+      if (!store.signals[key]) return;
+      const isCheckbox = el.type === 'checkbox';
+
+      // Estado → UI
+      store.signals[key].subscribe((val) => {
+        if (isCheckbox) el.checked = !!val;
+        else if (el.value !== val) el.value = val != null ? val : ''; // guard: no mover el cursor
+      }, signal);
+
+      // UI → Estado
+      const evt = (el.tagName === 'SELECT' || isCheckbox) ? 'change' : 'input';
+      const handler = (e) => { store.state[key] = isCheckbox ? e.target.checked : e.target.value; };
+      el.addEventListener(evt, handler);
+      signal?.addEventListener('abort', () => el.removeEventListener(evt, handler), { once: true });
+    });
   }
 
   // Delegación de clicks: data-action="nombre" llama a actions[nombre].
@@ -132,11 +152,15 @@ export class HomlyComponent extends HTMLElement {
         this.innerHTML = this.template();
       }
 
-      // El CSS de styleUrl se envuelve en @scope para que no se filtre fuera del componente.
+      // El CSS (de styleUrl o de styles inline) se envuelve en @scope para que no se filtre fuera del componente.
       if (this.styleUrl) {
         const css = await Homly.loadTemplate(resolve(this.styleUrl));
         const styleBlock = document.createElement('style');
         styleBlock.textContent = `@scope {\n${css}\n}`;
+        this.prepend(styleBlock);
+      } else if (this.styles) {
+        const styleBlock = document.createElement('style');
+        styleBlock.textContent = `@scope {\n${this.styles}\n}`;
         this.prepend(styleBlock);
       }
     }
@@ -153,6 +177,7 @@ export class HomlyComponent extends HTMLElement {
 
   get templateUrl() { return null; }
   get styleUrl() { return null; }
+  get styles() { return null; }
   get basePath() { return null; }
   get template() { return null; }
   get store() { return null; }
