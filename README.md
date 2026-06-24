@@ -61,6 +61,18 @@ customElements.define('mi-contador', Contador);
   plantilla. Sirve para dejar inline el contenido above-the-fold.
 - El CSS de `styleUrl` se envuelve en `@scope`, así no se filtra fuera del componente.
 
+## 🤝 Contribuir
+
+¡Las contribuciones son bienvenidas! La rama `main` está protegida: todo cambio entra por Pull Request.
+
+1. Hacé un fork del repositorio.
+2. Creá tu rama de feature (`git checkout -b feature/mi-feature`).
+3. Commiteá tus cambios (`git commit -m 'Agrega mi feature'`).
+4. Pusheá la rama (`git push origin feature/mi-feature`).
+5. Abrí un Pull Request.
+
+Los PR los valida y mergea el creador (o quien tenga permiso de escritura). Antes de empezar, leé las [guías de contribución](CONTRIBUTING.md) para los estándares de código.
+
 ## Licencia
 
 MIT
