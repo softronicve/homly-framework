@@ -1,13 +1,33 @@
 /**
- * homly.js — micro-framework de Web Components con reactividad por señales.
- * Sin dependencias, sin build.
- * @version 1.0.0
+ * homly.js — a tiny reactive Web Components framework.
+ *
+ * Vanilla JavaScript, zero dependencies and no build step: it runs straight in
+ * the browser. State is reactive through fine-grained signals, the DOM is wired
+ * with `data-*` attributes, and each component is a Custom Element that loads
+ * its HTML and CSS from sibling files.
+ *
+ * @version 1.1.0
+ * @license MIT
  */
 
+/**
+ * Static helpers that power the framework: template loading, the reactive store,
+ * DOM binding and the click dispatcher.
+ */
 export class Homly {
+  /**
+   * Cache of fetched templates/stylesheets, keyed by resolved URL.
+   * @type {Map<string, string>}
+   */
   static templateCache = new Map();
 
-  // Descarga un archivo de texto (plantilla o CSS) y lo cachea por URL.
+  /**
+   * Fetch a text resource (an HTML template or a CSS file) and cache it by URL.
+   * Subsequent calls for the same URL return the cached text.
+   *
+   * @param {string} url - URL of the resource to fetch.
+   * @returns {Promise<string>} The resource body as text.
+   */
   static async loadTemplate(url) {
     if (this.templateCache.has(url)) return this.templateCache.get(url);
     const response = await fetch(url);
@@ -16,7 +36,17 @@ export class Homly {
     return html;
   }
 
-  // Crea una señal por cada clave del estado inicial.
+  /**
+   * Create a reactive store with one signal per key of the initial state.
+   *
+   * Each signal keeps its own set of subscribers and notifies them synchronously
+   * when its value changes. The returned `state` is a Proxy, so you can read and
+   * write values directly (`store.state.key = value`).
+   *
+   * @param {Object<string, *>} initialState - Initial keys and values.
+   * @returns {{ state: Object, signals: Object<string, { subscribe: Function, set: Function, get: Function }> }}
+   *   `state` (the reactive proxy) and `signals` (the raw per-key signals).
+   */
   static createStore(initialState) {
     const signals = {};
     const subscribers = {};
@@ -26,6 +56,11 @@ export class Homly {
       subscribers[key] = new Set();
 
       signals[key] = {
+        /**
+         * Subscribe to changes of this key. Runs immediately with the current value.
+         * @param {(value: *) => void} fn - Callback invoked on every change.
+         * @param {AbortSignal} [abortSignal] - When aborted, removes the subscription.
+         */
         subscribe: (fn, abortSignal) => {
           subscribers[key].add(fn);
           if (abortSignal) {
@@ -33,16 +68,21 @@ export class Homly {
           }
           fn(value);
         },
+        /**
+         * Update the value and notify subscribers. No-op if the value is unchanged.
+         * @param {*} newVal - The new value.
+         */
         set: (newVal) => {
           if (value === newVal) return;
           value = newVal;
           subscribers[key].forEach(fn => fn(value));
         },
+        /** @returns {*} The current value. */
         get: () => value,
       };
     }
 
-    // Proxy para leer y escribir como store.state.clave.
+    // Proxy so the store can be read/written as `store.state.key`.
     const stateProxy = new Proxy({}, {
       get(_, prop) { return signals[prop] ? signals[prop].get() : undefined; },
       set(_, prop, val) {
@@ -54,7 +94,22 @@ export class Homly {
     return { state: stateProxy, signals };
   }
 
-  // Enlaza el DOM al store mediante atributos data-*.
+  /**
+   * Wire a container's DOM to a store using declarative `data-*` attributes:
+   *
+   * - `data-bind="key"` — write the value as the element's text content.
+   * - `data-if="key"` — toggle the `hidden` attribute from the value's truthiness.
+   * - `data-bind-class="class:key"` — add/remove a class from the value's truthiness.
+   * - `data-bind-attr="attr:key"` — bind an attribute (e.g. `href`) to the value.
+   * - `data-model="key"` — two-way binding for input/textarea/select/checkbox.
+   *
+   * Every subscription/listener is tied to `signal`, so it is cleaned up when the
+   * component disconnects.
+   *
+   * @param {HTMLElement} container - Root element to scan for bindings.
+   * @param {{ signals: Object, state: Object }} store - Store from {@link Homly.createStore}.
+   * @param {AbortSignal} signal - Abort signal used to tear down listeners/subscriptions.
+   */
   static bindView(container, store, signal) {
     container.querySelectorAll('[data-bind]').forEach(el => {
       const key = el.getAttribute('data-bind');
@@ -96,19 +151,19 @@ export class Homly {
       }
     });
 
-    // Two-way binding: data-model="clave" (input / textarea / select / checkbox).
+    // Two-way binding: data-model="key" on input / textarea / select / checkbox.
     container.querySelectorAll('[data-model]').forEach(el => {
       const key = el.getAttribute('data-model');
       if (!store.signals[key]) return;
       const isCheckbox = el.type === 'checkbox';
 
-      // Estado → UI
+      // State -> UI
       store.signals[key].subscribe((val) => {
         if (isCheckbox) el.checked = !!val;
-        else if (el.value !== val) el.value = val != null ? val : ''; // guard: no mover el cursor
+        else if (el.value !== val) el.value = val != null ? val : ''; // guard: keep the caret in place
       }, signal);
 
-      // UI → Estado
+      // UI -> State
       const evt = (el.tagName === 'SELECT' || isCheckbox) ? 'change' : 'input';
       const handler = (e) => { store.state[key] = isCheckbox ? e.target.checked : e.target.value; };
       el.addEventListener(evt, handler);
@@ -116,7 +171,15 @@ export class Homly {
     });
   }
 
-  // Delegación de clicks: data-action="nombre" llama a actions[nombre].
+  /**
+   * Attach a single delegated click listener that maps `data-action="name"`
+   * clicks to handlers in `actions`. The listener is removed when
+   * `context.signal` aborts.
+   *
+   * @param {HTMLElement} container - Element the listener is attached to.
+   * @param {Object<string, (target: HTMLElement, context: Object) => void>} actions - Handlers by action name.
+   * @param {{ signal?: AbortSignal, host?: HTMLElement }} [context] - Passed as the second argument to each handler.
+   */
   static attachDispatcher(container, actions, context = {}) {
     const handler = async (e) => {
       const target = e.target.closest('[data-action]');
@@ -131,62 +194,98 @@ export class Homly {
   }
 }
 
+/**
+ * Base class for Homly components. Extend it and override the getters
+ * (`templateUrl`, `styleUrl`/`styles`, `basePath`, `store`, `actions`) and the
+ * lifecycle hooks (`onMount`, `onUnmount`).
+ *
+ * On connect it performs "smart hydration": if the element already has content
+ * (e.g. server-rendered), it is kept; otherwise the template is loaded. Scoped
+ * CSS is injected only once (marked with `data-homly-scope`), and the DOM is
+ * then wired to the store and the action dispatcher.
+ *
+ * @extends HTMLElement
+ */
 export class HomlyComponent extends HTMLElement {
   constructor() {
     super();
     this.controller = new AbortController();
+    /** @type {AbortSignal} Aborted on disconnect; tears down bindings and listeners. */
     this.signal = this.controller.signal;
   }
 
+  /**
+   * Lifecycle hook: load/hydrate the template and scoped CSS, then wire reactivity.
+   * @returns {Promise<void>}
+   */
   async connectedCallback() {
     const resolve = (path) => (this.basePath ? new URL(path, this.basePath).href : path);
 
-    // Si el componente ya trae contenido en el HTML, se hidrata sin volver a
-    // descargar plantilla ni estilo.
-    const prerendered = this.childElementCount > 0;
+    // Smart hydration: load the HTML only if the element is empty; if it already
+    // has content (pre-render / SSR), leave it untouched.
+    if (this.children.length === 0) {
+      if (this.templateUrl) this.innerHTML = await Homly.loadTemplate(resolve(this.templateUrl));
+      else if (this.template) this.innerHTML = this.template();
+    }
 
-    if (!prerendered) {
-      if (this.templateUrl) {
-        this.innerHTML = await Homly.loadTemplate(resolve(this.templateUrl));
-      } else if (this.template) {
-        this.innerHTML = this.template();
-      }
+    // Scoped CSS via @scope. Tagged with data-homly-scope so it is not duplicated
+    // when hydrating content that already shipped its own <style>.
+    if (!this.querySelector('style[data-homly-scope]')) {
+      let cssText = '';
+      if (this.styleUrl) cssText = await Homly.loadTemplate(resolve(this.styleUrl));
+      else if (this.styles) cssText = this.styles;
 
-      // El CSS (de styleUrl o de styles inline) se envuelve en @scope para que no se filtre fuera del componente.
-      if (this.styleUrl) {
-        const css = await Homly.loadTemplate(resolve(this.styleUrl));
+      if (cssText) {
         const styleBlock = document.createElement('style');
-        styleBlock.textContent = `@scope {\n${css}\n}`;
-        this.prepend(styleBlock);
-      } else if (this.styles) {
-        const styleBlock = document.createElement('style');
-        styleBlock.textContent = `@scope {\n${this.styles}\n}`;
+        styleBlock.setAttribute('data-homly-scope', '');
+        styleBlock.textContent = `@scope {\n${cssText}\n}`;
         this.prepend(styleBlock);
       }
     }
 
+    // Wire the DOM to reactivity: shared (global) stores first, then the local store.
+    if (this.globalStores) {
+      this.globalStores.forEach(gStore => Homly.bindView(this, gStore, this.signal));
+    }
     if (this.store) Homly.bindView(this, this.store, this.signal);
     if (this.actions) Homly.attachDispatcher(this, this.actions, { signal: this.signal, host: this });
     if (this.onMount) this.onMount();
   }
 
+  /** Lifecycle hook: abort all subscriptions/listeners and call `onUnmount` if defined. */
   disconnectedCallback() {
     this.controller.abort();
     if (this.onUnmount) this.onUnmount();
   }
 
+  /** @returns {?string} URL of the HTML template, resolved against `basePath` when set. */
   get templateUrl() { return null; }
+  /** @returns {?string} URL of a CSS file; injected scoped with `@scope`. */
   get styleUrl() { return null; }
+  /** @returns {?string} Inline CSS string (alternative to `styleUrl`). */
   get styles() { return null; }
+  /** @returns {?string} Base URL for resolving relative paths (usually `import.meta.url`). */
   get basePath() { return null; }
+  /** @returns {?(() => string)} Function returning an HTML string (alternative to `templateUrl`). */
   get template() { return null; }
+  /** @returns {?{ state: Object, signals: Object }} The component's reactive store. */
   get store() { return null; }
+  /** @returns {?Object<string, Function>} Map of action names to handlers. */
   get actions() { return null; }
+  /** @returns {?Array<{ state: Object, signals: Object }>} Shared stores bound in addition to `store`. */
+  get globalStores() { return null; }
 }
 
+/**
+ * Minimal SPA router. It swaps the content of a root element on navigation,
+ * intercepts `<a data-router-link>` clicks, and supports per-route lazy loading
+ * (code splitting).
+ */
 export class HomlyRouter {
+  /** @param {string} rootId - id of the element whose content is swapped per route. */
   constructor(rootId) {
     this.root = document.getElementById(rootId);
+    /** @type {Object<string, { tag: string, loader: ?Function }>} */
     this.routes = {};
 
     window.addEventListener('popstate', () => this.handleRoute(window.location.pathname));
@@ -200,21 +299,39 @@ export class HomlyRouter {
     });
   }
 
-  add(path, componentTag) {
-    this.routes[path] = componentTag;
+  /**
+   * Register a route.
+   * @param {string} path - URL path (e.g. `/contact`).
+   * @param {string} componentTag - Custom element tag to render (e.g. `homly-contact-page`).
+   * @param {?(() => Promise<*>)} [loader] - Optional dynamic import run before render (code splitting).
+   */
+  add(path, componentTag, loader = null) {
+    this.routes[path] = { tag: componentTag, loader };
   }
 
+  /**
+   * Navigate to a path with `pushState` (no full reload).
+   * @param {string} path
+   */
   navigate(path) {
     window.history.pushState({}, '', path);
     this.handleRoute(path);
   }
 
-  handleRoute(path) {
-    const componentTag = this.routes[path] || this.routes['/404'] || '<div>404 No encontrado</div>';
-    this.root.innerHTML = componentTag;
+  /**
+   * Resolve a route: run its lazy loader (if any), then render its tag into root.
+   * Falls back to a `/404` route or an empty `<div>`.
+   * @param {string} path
+   * @returns {Promise<void>}
+   */
+  async handleRoute(path) {
+    const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
+    if (route.loader) await route.loader();
+    this.root.innerHTML = `<${route.tag}></${route.tag}>`;
     window.scrollTo(0, 0);
   }
 
+  /** Render the route matching the current `location.pathname`. */
   start() {
     this.handleRoute(window.location.pathname);
   }
