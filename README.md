@@ -76,6 +76,20 @@ customElements.define('mi-contador', Contador);
   las directivas normales (`data-bind`, etc.) resuelven contra cada ítem. Para que
   reaccione, reasigná el array con una referencia nueva: `store.state.items = [...next]`.
 
+```html
+<!-- una lista reactiva: reusa nodos al cambiar el array -->
+<template data-for="propiedades" data-key="id" data-index="i">
+  <article data-bind-attr="data-id:id">
+    <span data-bind="i"></span>. <strong data-bind="titulo"></strong> — <span data-bind="precio"></span>
+  </article>
+</template>
+```
+
+```js
+// para que reaccione, reasigná con una referencia nueva (no mutes in-place):
+store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
+```
+
 ## API
 
 - `HomlyComponent` — clase base. Getters: `templateUrl`, `styleUrl`, `basePath`,
