@@ -77,7 +77,7 @@ customElements.define('mi-contador', Contador);
   `store`, `actions`, `globalStores`. Hooks: `onMount` (una vez), `onActivate`
   (cada vez que se muestra), `onDeactivate` (cada vez que se oculta con keep-alive),
   `onUnmount` (al destruir).
-- `Homly.createStore(estado)` — devuelve `{ state, signals }`. Mutás con
+- `Homly.createStore(estado)` — devuelve `{ state, signals, computed }`. Mutás con
   `store.state.clave = valor`.
 - `Homly.computed(deps, fn)` — señal derivada de solo lectura. `deps` son señales;
   `fn` es una función pura de sus valores. Se recalcula cuando una dep cambia y

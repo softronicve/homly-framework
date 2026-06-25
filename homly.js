@@ -74,8 +74,9 @@ export class Homly {
    * write values directly (`store.state.key = value`).
    *
    * @param {Object<string, *>} initialState - Initial keys and values.
-   * @returns {{ state: Object, signals: Object<string, { subscribe: Function, set: Function, get: Function }> }}
-   *   `state` (the reactive proxy) and `signals` (the raw per-key signals).
+   * @returns {{ state: Object, signals: Object<string, { subscribe: Function, set: Function, get: Function }>, computed: Function }}
+   *   `state` (the reactive proxy), `signals` (the raw per-key signals), and
+   *   `computed(name, depKeys, fn)` to register a derived signal as a store key.
    */
   static createStore(initialState) {
     const signals = {};
