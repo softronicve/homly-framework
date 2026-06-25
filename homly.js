@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.1.0
+ * @version 1.2.0
  * @license MIT
  */
 
@@ -176,6 +176,13 @@ export class Homly {
    * clicks to handlers in `actions`. The listener is removed when
    * `context.signal` aborts.
    *
+   * While an async action runs, the framework manages the target's loading
+   * state automatically: it disables the control, adds the `is-loading` class
+   * and, if the target has a `data-loading-text` attribute, swaps its text for
+   * that label. When the action settles, the state is restored. The original
+   * text is only restored if the action did not change it itself — so a handler
+   * can leave a final label (e.g. "Sent!") and the framework won't overwrite it.
+   *
    * @param {HTMLElement} container - Element the listener is attached to.
    * @param {Object<string, (target: HTMLElement, context: Object) => void>} actions - Handlers by action name.
    * @param {{ signal?: AbortSignal, host?: HTMLElement }} [context] - Passed as the second argument to each handler.
@@ -185,7 +192,27 @@ export class Homly {
       const target = e.target.closest('[data-action]');
       if (!target) return;
       const actionName = target.getAttribute('data-action');
-      if (actions[actionName]) await actions[actionName](target, context);
+      const action = actions[actionName];
+      if (!action) return;
+
+      const loadingText = target.getAttribute('data-loading-text');
+      const originalText = target.textContent;
+      const isControl = target.tagName === 'BUTTON' || target.tagName === 'INPUT';
+
+      if (loadingText !== null) target.textContent = loadingText;
+      if (isControl) target.disabled = true;
+      target.classList.add('is-loading');
+
+      try {
+        await action(target, context);
+      } finally {
+        if (isControl) target.disabled = false;
+        target.classList.remove('is-loading');
+        // Restaurar el texto solo si la acción no lo cambió ella misma.
+        if (loadingText !== null && target.textContent === loadingText) {
+          target.textContent = originalText;
+        }
+      }
     };
     container.addEventListener('click', handler);
     if (context.signal) {
