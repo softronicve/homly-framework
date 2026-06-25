@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.2.1/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.3.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.2.1/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.3.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.2.1`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.3.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -74,10 +74,15 @@ customElements.define('mi-contador', Contador);
 ## API
 
 - `HomlyComponent` — clase base. Getters: `templateUrl`, `styleUrl`, `basePath`,
-  `store`, `actions`. Hooks: `onMount`, `onUnmount`.
+  `store`, `actions`, `globalStores`. Hooks: `onMount` (una vez), `onActivate`
+  (cada vez que se muestra), `onDeactivate` (cada vez que se oculta con keep-alive),
+  `onUnmount` (al destruir).
 - `Homly.createStore(estado)` — devuelve `{ state, signals }`. Mutás con
   `store.state.clave = valor`.
-- `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>`.
+- `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>` y permite
+  lazy loading por ruta. Con `new HomlyRouter('root', { keepAlive: true })` conserva
+  el DOM/estado/scroll de cada ruta visitada (la oculta en vez de destruirla) y llama
+  a `onActivate`/`onDeactivate`; `evict(path)` la descarga de la cache.
 
 ## Detalles
 
@@ -122,7 +127,7 @@ Para un panel de administración (o cualquier SPA con muchas secciones) el patr�
   };
   ```
 
-- **Volver a un módulo no re-descarga nada** — el `import()` lo cachea el navegador y las plantillas/CSS quedan en el cache interno de `loadTemplate`. Al regresar, el módulo se vuelve a renderizar desde cache, sin red. Para que además los **datos** persistan entre navegaciones, guardalos en un store global (no en estado local del componente).
+- **Volver a un módulo no re-descarga nada** — el `import()` lo cachea el navegador y las plantillas/CSS quedan en el cache interno de `loadTemplate`. Al regresar, el módulo se vuelve a renderizar desde cache, sin red. Para que además los **datos** persistan entre navegaciones, guardalos en un store global (no en estado local del componente). Y si querés preservar el **DOM/scroll exacto** (por ejemplo el scroll de un chat o un listado largo), activá keep-alive: `new HomlyRouter('outlet', { keepAlive: true })` — el módulo se oculta en vez de destruirse y vuelve instantáneo, disparando `onActivate`/`onDeactivate`.
 
 ## Caso de éxito
 
