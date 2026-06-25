@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.2.0
+ * @version 1.2.1
  * @license MIT
  */
 
@@ -248,20 +248,28 @@ export class HomlyComponent extends HTMLElement {
   async connectedCallback() {
     const resolve = (path) => (this.basePath ? new URL(path, this.basePath).href : path);
 
-    // Smart hydration: load the HTML only if the element is empty; if it already
-    // has content (pre-render / SSR), leave it untouched.
-    if (this.children.length === 0) {
-      if (this.templateUrl) this.innerHTML = await Homly.loadTemplate(resolve(this.templateUrl));
-      else if (this.template) this.innerHTML = this.template();
+    // Smart hydration: only fetch the HTML if the element is empty; if it already
+    // has content (pre-render / SSR), leave it untouched. The scoped CSS is added
+    // unless the content already shipped its own <style data-homly-scope>.
+    const needsTemplate = this.children.length === 0 && (this.templateUrl || this.template);
+    const needsStyle = !this.querySelector('style[data-homly-scope]') && (this.styleUrl || this.styles);
+
+    // Fetch HTML and CSS up front (in parallel) so we can apply both in a single
+    // synchronous step. If we set innerHTML and then `await` the stylesheet, the
+    // browser may paint the unstyled HTML in between — a flash of unstyled content
+    // (e.g. a position:fixed modal showing for a frame). Awaiting both first and
+    // applying them with no await in between guarantees the first paint is styled.
+    const [tplText, cssFile] = await Promise.all([
+      needsTemplate && this.templateUrl ? Homly.loadTemplate(resolve(this.templateUrl)) : Promise.resolve(null),
+      needsStyle && this.styleUrl ? Homly.loadTemplate(resolve(this.styleUrl)) : Promise.resolve(null),
+    ]);
+
+    // innerHTML replaces children, so set it first and then prepend the <style>.
+    if (needsTemplate) {
+      this.innerHTML = this.templateUrl ? tplText : this.template();
     }
-
-    // Scoped CSS via @scope. Tagged with data-homly-scope so it is not duplicated
-    // when hydrating content that already shipped its own <style>.
-    if (!this.querySelector('style[data-homly-scope]')) {
-      let cssText = '';
-      if (this.styleUrl) cssText = await Homly.loadTemplate(resolve(this.styleUrl));
-      else if (this.styles) cssText = this.styles;
-
+    if (needsStyle) {
+      const cssText = this.styleUrl ? cssFile : this.styles;
       if (cssText) {
         const styleBlock = document.createElement('style');
         styleBlock.setAttribute('data-homly-scope', '');
