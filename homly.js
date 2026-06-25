@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.3.0
+ * @version 1.3.1
  * @license MIT
  */
 
@@ -412,7 +412,10 @@ export class HomlyRouter {
       this.alive.set(path, entry);
     }
     entry.el.style.display = '';
-    window.scrollTo(0, entry.scrollY);                 // restore scroll on return
+    // Restore scroll on the next frame: scrolling synchronously right after the
+    // display change clamps against a stale (not-yet-reflowed) document height.
+    const y = entry.scrollY;
+    requestAnimationFrame(() => window.scrollTo(0, y));
     if (!isNew) entry.el.onActivate?.();               // re-activation (first one came from connectedCallback)
     this.current = path;
   }
