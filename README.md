@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.3.1/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.4.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.3.1/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.4.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.3.1`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.4.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -89,6 +89,12 @@ customElements.define('mi-contador', Contador);
 - Si un componente ya trae contenido en el HTML, se hidrata sin volver a pedir la
   plantilla. Sirve para dejar inline el contenido above-the-fold.
 - El CSS de `styleUrl` se envuelve en `@scope`, así no se filtra fuera del componente.
+- **Cache + request collapsing:** las plantillas/CSS se cachean por URL (volver a un
+  módulo no re-descarga), y si varios componentes piden el mismo archivo a la vez se
+  lanza un solo `fetch` compartido.
+- **Error boundary:** si la hidratación falla (p. ej. la plantilla no carga), el
+  componente muestra un placeholder en vez de romper el DOM. Sobrescribí `renderError(err)`
+  para personalizar el mensaje.
 
 ## Patrón: panel / SPA con módulos lazy
 
