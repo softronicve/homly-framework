@@ -10,10 +10,33 @@ La idea es simple:
 - El estado es reactivo: una señal por variable. El DOM se enlaza con atributos `data-*`.
 - Los eventos se manejan con `data-action`.
 
+## Instalación
+
+No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
+
+```js
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.1.0/homly.js';
+```
+
+O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
+
+```html
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script type="importmap">
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.1.0/homly.js" } }
+</script>
+```
+
+```js
+import { HomlyComponent, Homly } from 'homly';
+```
+
+Fijá siempre una versión (`@v1.1.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+
 ## Ejemplo
 
 ```js
-import { HomlyComponent, Homly } from './homly.js';
+import { HomlyComponent, Homly } from 'homly';
 
 class Contador extends HomlyComponent {
   get basePath() { return import.meta.url; }
@@ -60,6 +83,10 @@ customElements.define('mi-contador', Contador);
 - Si un componente ya trae contenido en el HTML, se hidrata sin volver a pedir la
   plantilla. Sirve para dejar inline el contenido above-the-fold.
 - El CSS de `styleUrl` se envuelve en `@scope`, así no se filtra fuera del componente.
+
+## Caso de éxito
+
+[**homly.world**](https://homly.world) — la landing del CRM inmobiliario Homly está hecha íntegramente con homly.js: Web Components, reactividad por señales, code splitting por ruta y CSS aislado con `@scope`, sin build. El código es abierto: [github.com/softronicve/homly-landing](https://github.com/softronicve/homly-landing).
 
 ## 🤝 Contribuir
 
