@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.2.1
+ * @version 1.3.0
  * @license MIT
  */
 
@@ -285,6 +285,10 @@ export class HomlyComponent extends HTMLElement {
     if (this.store) Homly.bindView(this, this.store, this.signal);
     if (this.actions) Homly.attachDispatcher(this, this.actions, { signal: this.signal, host: this });
     if (this.onMount) this.onMount();
+    // First activation, after the template has rendered. Under a keep-alive router
+    // `onMount` runs once but `onActivate` runs again every time the element is
+    // shown back; here we fire the first one (re-activations come from the router).
+    if (this.onActivate) this.onActivate();
   }
 
   /** Lifecycle hook: abort all subscriptions/listeners and call `onUnmount` if defined. */
@@ -309,19 +313,39 @@ export class HomlyComponent extends HTMLElement {
   get actions() { return null; }
   /** @returns {?Array<{ state: Object, signals: Object }>} Shared stores bound in addition to `store`. */
   get globalStores() { return null; }
+
+  // Optional lifecycle hooks (define them as methods on your subclass):
+  //   onMount()      — once, after the template renders.
+  //   onActivate()   — when the element becomes visible (first mount + every time
+  //                    a keep-alive router shows it again).
+  //   onDeactivate() — when a keep-alive router hides it (navigating away).
+  //   onUnmount()    — when the element is removed from the DOM.
 }
 
 /**
  * Minimal SPA router. It swaps the content of a root element on navigation,
  * intercepts `<a data-router-link>` clicks, and supports per-route lazy loading
  * (code splitting).
+ *
+ * With `{ keepAlive: true }` each visited route's element is kept mounted and
+ * toggled with `display` instead of being destroyed: returning to a route is
+ * instant, with its DOM, state and scroll preserved. The router calls the
+ * component's `onActivate`/`onDeactivate` hooks on show/hide; use `evict(path)`
+ * to drop a cached route (which fires its `onUnmount`).
  */
 export class HomlyRouter {
-  /** @param {string} rootId - id of the element whose content is swapped per route. */
-  constructor(rootId) {
+  /**
+   * @param {string} rootId - id of the element whose content is swapped per route.
+   * @param {{ keepAlive?: boolean }} [opts] - keepAlive preserves each visited route's element.
+   */
+  constructor(rootId, { keepAlive = false } = {}) {
     this.root = document.getElementById(rootId);
     /** @type {Object<string, { tag: string, loader: ?Function }>} */
     this.routes = {};
+    this.keepAlive = keepAlive;
+    /** @type {Map<string, { el: HTMLElement, scrollY: number }>} */
+    this.alive = new Map();
+    this.current = null;
 
     window.addEventListener('popstate', () => this.handleRoute(window.location.pathname));
 
@@ -362,8 +386,49 @@ export class HomlyRouter {
   async handleRoute(path) {
     const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
     if (route.loader) await route.loader();
-    this.root.innerHTML = `<${route.tag}></${route.tag}>`;
-    window.scrollTo(0, 0);
+
+    // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
+    if (!this.keepAlive) {
+      this.root.innerHTML = `<${route.tag}></${route.tag}>`;
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    // Keep-alive: hide the outgoing route (saving its scroll) and notify it.
+    if (this.current && this.alive.has(this.current)) {
+      const prev = this.alive.get(this.current);
+      prev.scrollY = window.scrollY;
+      prev.el.style.display = 'none';
+      prev.el.onDeactivate?.();
+    }
+
+    // Show the incoming route: create it the first time, reuse it afterwards.
+    let entry = this.alive.get(path);
+    const isNew = !entry;
+    if (isNew) {
+      const el = document.createElement(route.tag);   // connectedCallback → onMount() → onActivate()
+      this.root.appendChild(el);
+      entry = { el, scrollY: 0 };
+      this.alive.set(path, entry);
+    }
+    entry.el.style.display = '';
+    window.scrollTo(0, entry.scrollY);                 // restore scroll on return
+    if (!isNew) entry.el.onActivate?.();               // re-activation (first one came from connectedCallback)
+    this.current = path;
+  }
+
+  /**
+   * Drop a cached keep-alive route, removing its element (fires its `onUnmount`).
+   * Useful to bound memory (e.g. an LRU when there are many routes).
+   * @param {string} path
+   */
+  evict(path) {
+    const entry = this.alive.get(path);
+    if (entry) {
+      entry.el.remove();
+      this.alive.delete(path);
+      if (this.current === path) this.current = null;
+    }
   }
 
   /** Render the route matching the current `location.pathname`. */
