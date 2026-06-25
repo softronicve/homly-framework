@@ -85,6 +85,45 @@ customElements.define('mi-contador', Contador);
   plantilla. Sirve para dejar inline el contenido above-the-fold.
 - El CSS de `styleUrl` se envuelve en `@scope`, así no se filtra fuera del componente.
 
+## Patrón: panel / SPA con módulos lazy
+
+Para un panel de administración (o cualquier SPA con muchas secciones) el patrón es:
+
+- **Shell persistente** — el sidebar y el topbar viven en `index.html` (o en componentes montados una sola vez), fuera del contenedor que cambia el router. Nunca se destruyen, así que su estado y sus suscripciones siguen vivos.
+- **Módulos = rutas lazy** — cada módulo se descarga solo al navegar a él:
+
+  ```js
+  router.add('/login',          'admin-login',          () => import('./modules/login/login.js'));
+  router.add('/dashboard',      'admin-dashboard',      () => import('./modules/dashboard/dashboard.js'));
+  router.add('/conversaciones', 'admin-conversaciones', () => import('./modules/conversaciones/conversaciones.js'));
+  ```
+
+- **Islands** — cada widget del dashboard es un componente propio (y puede ser lazy: importalo en `onMount` del módulo). Cada uno hidrata y mantiene su estado por separado.
+- **Estado global compartido** — un store es un singleton de módulo; cualquier componente lo enlaza con `get globalStores() { return [miStore]; }`. Sirve para que, por ejemplo, un mensaje entrante actualice un badge en el menú aunque estés en otra ruta:
+
+  ```js
+  // stores/notifications.js
+  export const notifications = Homly.createStore({ unread: 0 });
+  ```
+  ```html
+  <!-- en el sidebar (persistente) -->
+  <a href="/conversaciones" data-router-link data-bind-class="alert:unread">
+    Conversaciones <span class="badge" data-if="unread" data-bind="unread"></span>
+  </a>
+  ```
+
+- **Guard de auth** — envolvé `handleRoute` para redirigir según la sesión:
+
+  ```js
+  const base = router.handleRoute.bind(router);
+  router.handleRoute = async (path) => {
+    if (!auth.state.isAuthenticated && path !== '/login') return router.navigate('/login');
+    await base(path);
+  };
+  ```
+
+- **Volver a un módulo no re-descarga nada** — el `import()` lo cachea el navegador y las plantillas/CSS quedan en el cache interno de `loadTemplate`. Al regresar, el módulo se vuelve a renderizar desde cache, sin red. Para que además los **datos** persistan entre navegaciones, guardalos en un store global (no en estado local del componente).
+
 ## Caso de éxito
 
 [**homly.world**](https://homly.world) — la landing del CRM inmobiliario Homly está hecha íntegramente con homly.js: Web Components, reactividad por señales, code splitting por ruta y CSS aislado con `@scope`, sin build. El código es abierto: [github.com/softronicve/homly-landing](https://github.com/softronicve/homly-landing).
