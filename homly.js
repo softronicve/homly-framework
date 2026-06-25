@@ -296,8 +296,14 @@ export class Homly {
           } else {
             const controller = new AbortController();
             const itemStore = Homly.createStore(indexName ? { ...item, [indexName]: i } : { ...item });
-            const node = tpl.content.cloneNode(true).firstElementChild;
-            Homly.bindView(node, itemStore, controller.signal);
+            // Bind through a throwaway wrapper so the item's ROOT element directives
+            // count too: bindView scans descendants, so a directive on the root node
+            // (e.g. data-bind-attr on the <article>) would be skipped if we bound the
+            // node directly. As a descendant of the wrapper, the root gets bound.
+            const wrapper = document.createElement('div');
+            wrapper.appendChild(tpl.content.cloneNode(true));
+            Homly.bindView(wrapper, itemStore, controller.signal);
+            const node = wrapper.firstElementChild;
             entry = { node, itemStore, controller };
             rendered.set(k, entry);
           }
