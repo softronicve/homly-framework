@@ -258,6 +258,66 @@ export class Homly {
   }
 
   /**
+   * Render a keyed list from a `<template data-for="arrayKey" data-key="field">`.
+   * For each item in the store's array signal it clones the template, gives the
+   * clone its own store (so the inner `data-*` bindings resolve against the item's
+   * fields) and reconciles by key on every array change: existing items reuse their
+   * node (updating only changed fields), new keys are created and gone keys removed.
+   * An optional `data-index="name"` exposes the 0-based position as a reactive field.
+   *
+   * @param {HTMLElement} container - Element to scan for `template[data-for]`.
+   * @param {{ signals: Object }} store - Store whose array signals back the lists.
+   * @param {AbortSignal} signal - Aborted on disconnect; tears down all item bindings.
+   */
+  static bindList(container, store, signal) {
+    if (!store) return;
+    container.querySelectorAll('template[data-for]').forEach((tpl) => {
+      const arrayKey = tpl.getAttribute('data-for');
+      const keyField = tpl.getAttribute('data-key');
+      const indexName = tpl.getAttribute('data-index');
+      if (!keyField) throw new Error(`data-for="${arrayKey}" requiere data-key`);
+      const arraySignal = store.signals[arrayKey];
+      if (!arraySignal) return;
+
+      const rendered = new Map();   // keyValue -> { node, itemStore, controller }
+
+      arraySignal.subscribe((items) => {
+        const list = Array.isArray(items) ? items : [];
+        const seen = new Set();
+        let ref = tpl;   // anchor: clones live right after the template, in order
+
+        list.forEach((item, i) => {
+          const k = item[keyField];
+          seen.add(k);
+          let entry = rendered.get(k);
+          if (entry) {
+            for (const field in item) entry.itemStore.state[field] = item[field];
+            if (indexName) entry.itemStore.state[indexName] = i;
+          } else {
+            const controller = new AbortController();
+            const itemStore = Homly.createStore(indexName ? { ...item, [indexName]: i } : { ...item });
+            const node = tpl.content.cloneNode(true).firstElementChild;
+            Homly.bindView(node, itemStore, controller.signal);
+            entry = { node, itemStore, controller };
+            rendered.set(k, entry);
+          }
+          if (ref.nextSibling !== entry.node) ref.parentNode.insertBefore(entry.node, ref.nextSibling);
+          ref = entry.node;
+        });
+
+        for (const [k, entry] of rendered) {
+          if (!seen.has(k)) { entry.controller.abort(); entry.node.remove(); rendered.delete(k); }
+        }
+      }, signal);
+
+      // On disconnect, tear down every item's bindings/listeners promptly.
+      signal?.addEventListener('abort', () => {
+        for (const entry of rendered.values()) entry.controller.abort();
+      }, { once: true });
+    });
+  }
+
+  /**
    * Attach a single delegated click listener that maps `data-action="name"`
    * clicks to handlers in `actions`. The listener is removed when
    * `context.signal` aborts.
@@ -386,6 +446,7 @@ export class HomlyComponent extends HTMLElement {
     }
     if (this.store) Homly.bindView(this, this.store, this.signal);
     if (this.actions) Homly.attachDispatcher(this, this.actions, { signal: this.signal, host: this });
+    if (this.store) Homly.bindList(this, this.store, this.signal);
     if (this.onMount) this.onMount();
     // First activation, after the template has rendered. Under a keep-alive router
     // `onMount` runs once but `onActivate` runs again every time the element is
