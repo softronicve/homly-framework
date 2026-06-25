@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.3.1
+ * @version 1.4.0
  * @license MIT
  */
 
@@ -22,18 +22,48 @@ export class Homly {
   static templateCache = new Map();
 
   /**
-   * Fetch a text resource (an HTML template or a CSS file) and cache it by URL.
-   * Subsequent calls for the same URL return the cached text.
+   * In-flight requests, keyed by URL. Lets simultaneous callers for the same URL
+   * share a single `fetch` (request collapsing) instead of each firing its own.
+   * @type {Map<string, Promise<string>>}
+   */
+  static pendingRequests = new Map();
+
+  /**
+   * Fetch a text resource (an HTML template or a CSS file), cached by URL.
+   *
+   * Three layers, in order:
+   *  1. Cache hit  — returns the stored text (so re-mounting a component never refetches).
+   *  2. In-flight  — returns the pending promise, so N components asking for the same
+   *                  URL at once trigger a single network request (request collapsing).
+   *  3. New        — fetches, stores the result in the cache and clears the pending entry.
+   *
+   * On a network/HTTP error the pending entry is cleared (so a later call can retry)
+   * and the error propagates to the caller (handled by the component's error boundary).
    *
    * @param {string} url - URL of the resource to fetch.
    * @returns {Promise<string>} The resource body as text.
    */
-  static async loadTemplate(url) {
-    if (this.templateCache.has(url)) return this.templateCache.get(url);
-    const response = await fetch(url);
-    const html = await response.text();
-    this.templateCache.set(url, html);
-    return html;
+  static loadTemplate(url) {
+    if (this.templateCache.has(url)) return Promise.resolve(this.templateCache.get(url));
+    if (this.pendingRequests.has(url)) return this.pendingRequests.get(url);
+
+    const request = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status} al cargar ${url}`);
+        return response.text();
+      })
+      .then((text) => {
+        this.templateCache.set(url, text);
+        this.pendingRequests.delete(url);
+        return text;
+      })
+      .catch((err) => {
+        this.pendingRequests.delete(url);   // permitir reintento en el próximo montaje
+        throw err;
+      });
+
+    this.pendingRequests.set(url, request);
+    return request;
   }
 
   /**
@@ -242,10 +272,26 @@ export class HomlyComponent extends HTMLElement {
   }
 
   /**
-   * Lifecycle hook: load/hydrate the template and scoped CSS, then wire reactivity.
+   * Lifecycle hook. Wraps hydration in an error boundary: if anything throws
+   * (e.g. a template fails to load over the network), it logs the error and
+   * renders a placeholder instead of leaving the component's DOM broken.
    * @returns {Promise<void>}
    */
   async connectedCallback() {
+    try {
+      await this._hydrate();
+    } catch (err) {
+      console.error(`[homly] fallo montando <${this.tagName.toLowerCase()}>`, err);
+      this.renderError(err);
+    }
+  }
+
+  /**
+   * Load/hydrate the template and scoped CSS, then wire reactivity. Called by
+   * `connectedCallback` inside an error boundary.
+   * @returns {Promise<void>}
+   */
+  async _hydrate() {
     const resolve = (path) => (this.basePath ? new URL(path, this.basePath).href : path);
 
     // Smart hydration: only fetch the HTML if the element is empty; if it already
@@ -295,6 +341,18 @@ export class HomlyComponent extends HTMLElement {
   disconnectedCallback() {
     this.controller.abort();
     if (this.onUnmount) this.onUnmount();
+  }
+
+  /**
+   * Render a fallback when hydration fails (the error boundary). Override this
+   * in a subclass to customise the message or markup.
+   * @param {Error} err - The error thrown during hydration.
+   */
+  renderError(err) {
+    this.innerHTML = '<div data-homly-error role="alert" style="padding:12px 14px;'
+      + 'border:1px solid #d9534f;border-radius:8px;color:#d9534f;'
+      + 'font:14px/1.45 system-ui,sans-serif">No se pudo cargar este contenido. '
+      + 'Intentá recargar la página.</div>';
   }
 
   /** @returns {?string} URL of the HTML template, resolved against `basePath` when set. */
