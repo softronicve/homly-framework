@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.4.0/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.5.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.4.0/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.5.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.4.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.5.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -77,8 +77,13 @@ customElements.define('mi-contador', Contador);
   `store`, `actions`, `globalStores`. Hooks: `onMount` (una vez), `onActivate`
   (cada vez que se muestra), `onDeactivate` (cada vez que se oculta con keep-alive),
   `onUnmount` (al destruir).
-- `Homly.createStore(estado)` — devuelve `{ state, signals }`. Mutás con
+- `Homly.createStore(estado)` — devuelve `{ state, signals, computed }`. Mutás con
   `store.state.clave = valor`.
+- `Homly.computed(deps, fn)` — señal derivada de solo lectura. `deps` son señales;
+  `fn` es una función pura de sus valores. Se recalcula cuando una dep cambia y
+  notifica solo si el resultado cambió. Como es una señal, se puede bindear igual.
+- `store.computed(nombre, [keys], fn)` — registra una computed como key del store,
+  así `data-bind="nombre"` y `store.state.nombre` funcionan sin nada extra.
 - `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>` y permite
   lazy loading por ruta. Con `new HomlyRouter('root', { keepAlive: true })` conserva
   el DOM/estado/scroll de cada ruta visitada (la oculta en vez de destruirla) y llama
@@ -95,6 +100,8 @@ customElements.define('mi-contador', Contador);
 - **Error boundary:** si la hidratación falla (p. ej. la plantilla no carga), el
   componente muestra un placeholder en vez de romper el DOM. Sobrescribí `renderError(err)`
   para personalizar el mensaje.
+- Las **computed signals** convierten el estado en un grafo reactivo: derivás un
+  valor de otras señales y se mantiene solo, sin recalcular a mano.
 
 ## Patrón: panel / SPA con módulos lazy
 

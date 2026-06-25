@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.4.0
+ * @version 1.5.0
  * @license MIT
  */
 
@@ -74,8 +74,9 @@ export class Homly {
    * write values directly (`store.state.key = value`).
    *
    * @param {Object<string, *>} initialState - Initial keys and values.
-   * @returns {{ state: Object, signals: Object<string, { subscribe: Function, set: Function, get: Function }> }}
-   *   `state` (the reactive proxy) and `signals` (the raw per-key signals).
+   * @returns {{ state: Object, signals: Object<string, { subscribe: Function, set: Function, get: Function }>, computed: Function }}
+   *   `state` (the reactive proxy), `signals` (the raw per-key signals), and
+   *   `computed(name, depKeys, fn)` to register a derived signal as a store key.
    */
   static createStore(initialState) {
     const signals = {};
@@ -121,7 +122,62 @@ export class Homly {
       },
     });
 
-    return { state: stateProxy, signals };
+    const store = { state: stateProxy, signals };
+
+    /**
+     * Register a computed signal as a key of this store. Its dependencies are
+     * other keys of the same store, so `data-bind="name"`, `store.state.name`
+     * and `globalStores` pick it up like any plain signal.
+     *
+     * @param {string} name - Key under which the computed is exposed.
+     * @param {string[]} depKeys - Keys of this store the computed derives from.
+     * @param {(...values: *[]) => *} fn - Pure function of the deps' values.
+     * @returns {{ subscribe: Function, get: Function, set: Function }} The computed.
+     */
+    store.computed = (name, depKeys, fn) => {
+      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn);
+      signals[name] = derived;
+      return derived;
+    };
+
+    return store;
+  }
+
+  /**
+   * Create a read-only signal derived from other signals. Dependencies are
+   * explicit: pass the source signals and a pure function of their values. The
+   * computed re-evaluates whenever any dependency changes and notifies its own
+   * subscribers only if the result actually changed (=== check), so it composes
+   * with `bindView` and `state` like any other signal.
+   *
+   * @param {Array<{ subscribe: Function, get: Function }>} deps - Source signals.
+   * @param {(...values: *[]) => *} fn - Pure function of the deps' current values.
+   * @param {AbortSignal} [abortSignal] - When aborted, unsubscribes from the deps.
+   * @returns {{ subscribe: Function, get: Function, set: Function }} A read-only
+   *   signal — its `set` throws, since computeds are derived, not written by hand.
+   */
+  static computed(deps, fn, abortSignal) {
+    const subscribers = new Set();
+    const evaluate = () => fn(...deps.map((dep) => dep.get()));
+    let value = evaluate();
+
+    const recompute = () => {
+      const next = evaluate();
+      if (next === value) return;
+      value = next;
+      subscribers.forEach((notify) => notify(value));
+    };
+    deps.forEach((dep) => dep.subscribe(recompute, abortSignal));
+
+    return {
+      subscribe: (notify, signal) => {
+        subscribers.add(notify);
+        if (signal) signal.addEventListener('abort', () => subscribers.delete(notify), { once: true });
+        notify(value);
+      },
+      get: () => value,
+      set: () => { throw new Error('Las computed signals son de solo lectura'); },
+    };
   }
 
   /**
