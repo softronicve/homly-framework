@@ -125,6 +125,43 @@ export class Homly {
   }
 
   /**
+   * Create a read-only signal derived from other signals. Dependencies are
+   * explicit: pass the source signals and a pure function of their values. The
+   * computed re-evaluates whenever any dependency changes and notifies its own
+   * subscribers only if the result actually changed (=== check), so it composes
+   * with `bindView` and `state` like any other signal.
+   *
+   * @param {Array<{ subscribe: Function, get: Function }>} deps - Source signals.
+   * @param {(...values: *[]) => *} fn - Pure function of the deps' current values.
+   * @param {AbortSignal} [abortSignal] - When aborted, unsubscribes from the deps.
+   * @returns {{ subscribe: Function, get: Function, set: Function }} A read-only
+   *   signal — its `set` throws, since computeds are derived, not written by hand.
+   */
+  static computed(deps, fn, abortSignal) {
+    const subscribers = new Set();
+    const evaluate = () => fn(...deps.map((dep) => dep.get()));
+    let value = evaluate();
+
+    const recompute = () => {
+      const next = evaluate();
+      if (next === value) return;
+      value = next;
+      subscribers.forEach((notify) => notify(value));
+    };
+    deps.forEach((dep) => dep.subscribe(recompute, abortSignal));
+
+    return {
+      subscribe: (notify, signal) => {
+        subscribers.add(notify);
+        if (signal) signal.addEventListener('abort', () => subscribers.delete(notify), { once: true });
+        notify(value);
+      },
+      get: () => value,
+      set: () => { throw new Error('Las computed signals son de solo lectura'); },
+    };
+  }
+
+  /**
    * Wire a container's DOM to a store using declarative `data-*` attributes:
    *
    * - `data-bind="key"` — write the value as the element's text content.
