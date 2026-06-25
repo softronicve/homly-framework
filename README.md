@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.5.0/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.6.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.5.0/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.6.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.5.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.6.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -70,6 +70,11 @@ customElements.define('mi-contador', Contador);
 - `data-bind-attr="atributo:clave"` — enlaza un atributo (por ejemplo `href`).
 - `data-action="nombre"` — conecta un click a `actions[nombre]`.
 - `data-loading-text="…"` — mientras una acción asíncrona corre, el framework gestiona solo el estado de carga del control: lo deshabilita, le agrega la clase `is-loading` y, si tiene `data-loading-text`, le pone ese texto. Al terminar, restaura el estado (el texto solo se restaura si la acción no lo cambió ella misma). No hace falta tocar el botón a mano.
+- `data-for="clave"` en un `<template>` — renderiza una lista desde un array del
+  store. Requiere `data-key="campo"` (identidad para reusar nodos al cambiar el
+  array) y acepta `data-index="i"` (expone el índice 0-based, reactivo). Adentro,
+  las directivas normales (`data-bind`, etc.) resuelven contra cada ítem. Para que
+  reaccione, reasigná el array con una referencia nueva: `store.state.items = [...next]`.
 
 ## API
 
