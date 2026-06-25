@@ -121,7 +121,25 @@ export class Homly {
       },
     });
 
-    return { state: stateProxy, signals };
+    const store = { state: stateProxy, signals };
+
+    /**
+     * Register a computed signal as a key of this store. Its dependencies are
+     * other keys of the same store, so `data-bind="name"`, `store.state.name`
+     * and `globalStores` pick it up like any plain signal.
+     *
+     * @param {string} name - Key under which the computed is exposed.
+     * @param {string[]} depKeys - Keys of this store the computed derives from.
+     * @param {(...values: *[]) => *} fn - Pure function of the deps' values.
+     * @returns {{ subscribe: Function, get: Function, set: Function }} The computed.
+     */
+    store.computed = (name, depKeys, fn) => {
+      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn);
+      signals[name] = derived;
+      return derived;
+    };
+
+    return store;
   }
 
   /**
