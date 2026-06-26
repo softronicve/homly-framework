@@ -44,8 +44,15 @@ export class Homly {
    * @returns {Promise<string>} The resource body as text.
    */
   static loadTemplate(url) {
-    if (this.templateCache.has(url)) return Promise.resolve(this.templateCache.get(url));
-    if (this.pendingRequests.has(url)) return this.pendingRequests.get(url);
+    if (this.templateCache.has(url)) {
+      if (Homly._level()) Homly._log('✓', 'cache HIT ' + url);
+      return Promise.resolve(this.templateCache.get(url));
+    }
+    if (this.pendingRequests.has(url)) {
+      if (Homly._level()) Homly._log('⇉', 'collapse ' + url);
+      return this.pendingRequests.get(url);
+    }
+    if (Homly._level()) Homly._log('↓', 'fetch ' + url);
 
     const request = fetch(url)
       .then((response) => {
@@ -277,7 +284,10 @@ export class Homly {
       const indexName = tpl.getAttribute('data-index');
       if (!keyField) throw new Error(`data-for="${arrayKey}" requiere data-key`);
       const arraySignal = store.signals[arrayKey];
-      if (!arraySignal) return;
+      if (!arraySignal) {
+        if (Homly._level()) Homly._warn('data-for="' + arrayKey + '": no existe la señal \'' + arrayKey + '\' en el store');
+        return;
+      }
 
       const rendered = new Map();   // keyValue -> { node, itemStore, controller }
 
@@ -459,6 +469,7 @@ export class HomlyComponent extends HTMLElement {
    * @returns {Promise<void>}
    */
   async _hydrate() {
+    const _t0 = performance.now();
     const resolve = (path) => (this.basePath ? new URL(path, this.basePath).href : path);
 
     // Smart hydration: only fetch the HTML if the element is empty; if it already
@@ -491,6 +502,13 @@ export class HomlyComponent extends HTMLElement {
       }
     }
 
+    if (Homly._level()) {
+      const _s = this.store;
+      if (_s !== undefined && _s !== this.store) {
+        Homly._warn(this.localName + ': store no memoizado (devuelve una instancia nueva por acceso) — usá get store(){ return this._store ??= … }');
+      }
+    }
+
     // Wire the DOM to reactivity: shared (global) stores first, then the local store.
     if (this.globalStores) {
       this.globalStores.forEach(gStore => Homly.bindView(this, gStore, this.signal));
@@ -503,11 +521,13 @@ export class HomlyComponent extends HTMLElement {
     // `onMount` runs once but `onActivate` runs again every time the element is
     // shown back; here we fire the first one (re-activations come from the router).
     if (this.onActivate) this.onActivate();
+    if (Homly._level()) Homly._log('⬆', this.localName + ' hydrated in ' + (performance.now() - _t0).toFixed(1) + 'ms');
   }
 
   /** Lifecycle hook: abort all subscriptions/listeners and call `onUnmount` if defined. */
   disconnectedCallback() {
     this.controller.abort();
+    if (Homly._level()) Homly._log('✕', this.localName + ' unmount');
     if (this.onUnmount) this.onUnmount();
   }
 
@@ -611,6 +631,7 @@ export class HomlyRouter {
    */
   async handleRoute(path) {
     const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
+    if (Homly._level()) Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path);
     if (route.loader) await route.loader();
 
     // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
@@ -626,11 +647,13 @@ export class HomlyRouter {
       prev.scrollY = window.scrollY;
       prev.el.style.display = 'none';
       prev.el.onDeactivate?.();
+      if (Homly._level()) Homly._log('⏸', prev.el.localName + ' deactivate');
     }
 
     // Show the incoming route: create it the first time, reuse it afterwards.
     let entry = this.alive.get(path);
     const isNew = !entry;
+    if (Homly._level()) Homly._log(isNew ? '▷' : '▶', 'keep-alive ' + (isNew ? 'MISS' : 'HIT') + ' ' + path);
     if (isNew) {
       const el = document.createElement(route.tag);   // connectedCallback → onMount() → onActivate()
       this.root.appendChild(el);
@@ -643,6 +666,7 @@ export class HomlyRouter {
     const y = entry.scrollY;
     requestAnimationFrame(() => window.scrollTo(0, y));
     if (!isNew) entry.el.onActivate?.();               // re-activation (first one came from connectedCallback)
+    if (!isNew && Homly._level()) Homly._log('▶', entry.el.localName + ' activate');
     this.current = path;
   }
 
@@ -655,6 +679,7 @@ export class HomlyRouter {
     const entry = this.alive.get(path);
     if (entry) {
       entry.el.remove();
+      if (Homly._level()) Homly._log('✕', 'evict ' + path);
       this.alive.delete(path);
       if (this.current === path) this.current = null;
     }
