@@ -324,6 +324,32 @@ export class Homly {
   }
 
   /**
+   * Current dev-logging level, read live from `globalThis.HOM_DEBUG`.
+   * Returns null (off), 'basic' or 'verbose'. Off returns immediately, so guarding
+   * a call-site with `if (Homly._level())` costs ~nothing when logging is disabled.
+   * @returns {null | 'basic' | 'verbose'}
+   */
+  static _level() {
+    const v = globalThis.HOM_DEBUG;
+    if (!v) return null;
+    return v === 'verbose' ? 'verbose' : 'basic';
+  }
+
+  /** Dev log line: `[homly] <glyph> <msg>`. Call guarded by `_level()`. */
+  static _log(glyph, msg) { console.log('[homly] ' + glyph + ' ' + msg); }
+
+  /** Dev warning: `[homly] ⚠ <msg>`. Call guarded by `_level()`. */
+  static _warn(msg) { console.warn('[homly] ⚠ ' + msg); }
+
+  /** Compact value formatter for verbose logs (avoids dumping big objects). */
+  static _fmt(v) {
+    if (Array.isArray(v)) return '[' + v.length + ']';
+    if (v && typeof v === 'object') return '{…}';
+    if (typeof v === 'string') return JSON.stringify(v);
+    return String(v);
+  }
+
+  /**
    * Attach a single delegated click listener that maps `data-action="name"`
    * clicks to handlers in `actions`. The listener is removed when
    * `context.signal` aborts.
@@ -372,6 +398,25 @@ export class Homly {
     }
   }
 }
+
+// Seed HOM_DEBUG once at load from the URL (?homly-debug[=verbose]) or localStorage
+// (HOM_DEBUG), unless it's already set on the global (an inline script wins). Priming
+// it here lets the very first hydration see the flag; everything else reads it live
+// via Homly._level().
+(() => {
+  if (globalThis.HOM_DEBUG !== undefined) return;
+  let raw;
+  try {
+    const qs = new URLSearchParams(globalThis.location?.search || '');
+    if (qs.has('homly-debug')) raw = qs.get('homly-debug') || 'true';
+    else raw = globalThis.localStorage?.getItem('HOM_DEBUG') ?? undefined;
+  } catch (_) { /* sandboxed / no DOM: stay off */ }
+  if (raw == null) return;
+  const v = String(raw).toLowerCase();
+  if (v === 'verbose') globalThis.HOM_DEBUG = 'verbose';
+  else if (v === 'false' || v === '0' || v === '') { /* explicit off */ }
+  else globalThis.HOM_DEBUG = true;
+})();
 
 /**
  * Base class for Homly components. Extend it and override the getters
