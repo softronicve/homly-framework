@@ -628,7 +628,9 @@ export class HomlyRouter {
 
   /**
    * Resolve a route: run its lazy loader (if any), then render its tag into root.
-   * Falls back to a `/404` route or an empty `<div>`.
+   * On the initial resolution, adopts a matching prerendered element already in
+   * the outlet (hydrating it in place) instead of recreating it; locked to the
+   * first call. Falls back to a `/404` route or an empty `<div>`.
    * @param {string} path
    * @returns {Promise<void>}
    */
