@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.8.2
+ * @version 1.8.3
  * @license MIT
  */
 
@@ -640,6 +640,11 @@ export class HomlyRouter {
    * @returns {Promise<void>}
    */
   async handleRoute(path) {
+    // In-page `#hash` links fire popstate with the *same* pathname. Re-rendering
+    // and resetting scroll here would cancel the browser's native anchor scroll,
+    // so bail when the resolved route hasn't changed (the first call always runs).
+    if (this._resolved === path) return;
+    this._resolved = path;
     const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
     if (Homly._level()) Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path);
     if (route.loader) await route.loader();
