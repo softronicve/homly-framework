@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.8.0
+ * @version 1.8.1
  * @license MIT
  */
 
@@ -290,6 +290,11 @@ export class Homly {
       if (!arraySignal) {
         if (Homly._level()) Homly._warn('data-for="' + arrayKey + '": no existe la señal \'' + arrayKey + '\' en el store');
         return;
+      }
+      // Each item's markup must have a single root element: only firstElementChild is
+      // mounted, so extra top-level siblings are silently dropped. Warn under HOM_DEBUG.
+      if (Homly._level() && tpl.content.childElementCount > 1) {
+        Homly._warn('data-for="' + arrayKey + '": el <template> debe tener un solo elemento raíz por ítem; se ignoran los demás');
       }
 
       const rendered = new Map();   // keyValue -> { node, itemStore, controller }
