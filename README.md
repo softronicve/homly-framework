@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.6.0/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.7.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.6.0/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.7.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.6.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.7.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -121,6 +121,21 @@ store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
   para personalizar el mensaje.
 - Las **computed signals** convierten el estado en un grafo reactivo: derivás un
   valor de otras señales y se mantiene solo, sin recalcular a mano.
+
+## Depuración (`HOM_DEBUG`)
+
+homly.js trae un logger de desarrollo opt-in (apagado por defecto, **sin costo en producción**). Se prende de tres formas, según el caso:
+
+- **En vivo, desde DevTools:** `window.HOM_DEBUG = true` (o `'verbose'`). Toggle inmediato, sin dejar rastro.
+- **Por link (QA/cliente):** agregá `?homly-debug` o `?homly-debug=verbose` a la URL. Atrapa la hidratación desde el primer milisegundo.
+- **Persistente entre recargas:** `localStorage.HOM_DEBUG = 'verbose'` en la consola; sobrevive a los F5.
+
+Precedencia: lo seteado en `window` gana sobre el query param, y este sobre `localStorage`.
+
+Dos niveles:
+
+- **`true`** (básico) — ciclo de vida e hidratación (`⬆ <tag> hydrated in Xms`), cache de plantillas (`fetch`/`cache HIT`/`collapse`), router (`⚡ route …`, `keep-alive HIT/MISS`, `activate`/`deactivate`) y *warnings* de errores comunes (store sin memoizar, `data-for` sin su array).
+- **`'verbose'`** — todo lo anterior **más** cada cambio de señal (`✎ signal precio: 199 → 249`) y cada recompute de computed (`↳ computed precioVes recompute: …`).
 
 ## Patrón: panel / SPA con módulos lazy
 

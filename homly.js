@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.6.0
+ * @version 1.7.0
  * @license MIT
  */
 
@@ -44,8 +44,15 @@ export class Homly {
    * @returns {Promise<string>} The resource body as text.
    */
   static loadTemplate(url) {
-    if (this.templateCache.has(url)) return Promise.resolve(this.templateCache.get(url));
-    if (this.pendingRequests.has(url)) return this.pendingRequests.get(url);
+    if (this.templateCache.has(url)) {
+      if (Homly._level()) Homly._log('✓', 'cache HIT ' + url);
+      return Promise.resolve(this.templateCache.get(url));
+    }
+    if (this.pendingRequests.has(url)) {
+      if (Homly._level()) Homly._log('⇉', 'collapse ' + url);
+      return this.pendingRequests.get(url);
+    }
+    if (Homly._level()) Homly._log('↓', 'fetch ' + url);
 
     const request = fetch(url)
       .then((response) => {
@@ -105,6 +112,7 @@ export class Homly {
          */
         set: (newVal) => {
           if (value === newVal) return;
+          if (Homly._level() === 'verbose') Homly._log('✎', 'signal ' + key + ': ' + Homly._fmt(value) + ' → ' + Homly._fmt(newVal));
           value = newVal;
           subscribers[key].forEach(fn => fn(value));
         },
@@ -135,7 +143,7 @@ export class Homly {
      * @returns {{ subscribe: Function, get: Function, set: Function }} The computed.
      */
     store.computed = (name, depKeys, fn) => {
-      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn);
+      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn, undefined, name);
       signals[name] = derived;
       return derived;
     };
@@ -153,10 +161,11 @@ export class Homly {
    * @param {Array<{ subscribe: Function, get: Function }>} deps - Source signals.
    * @param {(...values: *[]) => *} fn - Pure function of the deps' current values.
    * @param {AbortSignal} [abortSignal] - When aborted, unsubscribes from the deps.
+   * @param {string} [label] - Optional name for verbose dev logs (set by store.computed).
    * @returns {{ subscribe: Function, get: Function, set: Function }} A read-only
    *   signal — its `set` throws, since computeds are derived, not written by hand.
    */
-  static computed(deps, fn, abortSignal) {
+  static computed(deps, fn, abortSignal, label) {
     const subscribers = new Set();
     const evaluate = () => fn(...deps.map((dep) => dep.get()));
     let value = evaluate();
@@ -164,6 +173,7 @@ export class Homly {
     const recompute = () => {
       const next = evaluate();
       if (next === value) return;
+      if (Homly._level() === 'verbose') Homly._log('↳', 'computed ' + (label ? label + ' ' : '') + 'recompute: ' + Homly._fmt(value) + ' → ' + Homly._fmt(next));
       value = next;
       subscribers.forEach((notify) => notify(value));
     };
@@ -277,7 +287,10 @@ export class Homly {
       const indexName = tpl.getAttribute('data-index');
       if (!keyField) throw new Error(`data-for="${arrayKey}" requiere data-key`);
       const arraySignal = store.signals[arrayKey];
-      if (!arraySignal) return;
+      if (!arraySignal) {
+        if (Homly._level()) Homly._warn('data-for="' + arrayKey + '": no existe la señal \'' + arrayKey + '\' en el store');
+        return;
+      }
 
       const rendered = new Map();   // keyValue -> { node, itemStore, controller }
 
@@ -321,6 +334,32 @@ export class Homly {
         for (const entry of rendered.values()) entry.controller.abort();
       }, { once: true });
     });
+  }
+
+  /**
+   * Current dev-logging level, read live from `globalThis.HOM_DEBUG`.
+   * Returns null (off), 'basic' or 'verbose'. Off returns immediately, so guarding
+   * a call-site with `if (Homly._level())` costs ~nothing when logging is disabled.
+   * @returns {null | 'basic' | 'verbose'}
+   */
+  static _level() {
+    const v = globalThis.HOM_DEBUG;
+    if (!v) return null;
+    return v === 'verbose' ? 'verbose' : 'basic';
+  }
+
+  /** Dev log line: `[homly] <glyph> <msg>`. Call guarded by `_level()`. */
+  static _log(glyph, msg) { console.log('[homly] ' + glyph + ' ' + msg); }
+
+  /** Dev warning: `[homly] ⚠ <msg>`. Call guarded by `_level()`. */
+  static _warn(msg) { console.warn('[homly] ⚠ ' + msg); }
+
+  /** Compact value formatter for verbose logs (avoids dumping big objects). */
+  static _fmt(v) {
+    if (Array.isArray(v)) return '[' + v.length + ']';
+    if (v && typeof v === 'object') return '{…}';
+    if (typeof v === 'string') return JSON.stringify(v);
+    return String(v);
   }
 
   /**
@@ -373,6 +412,25 @@ export class Homly {
   }
 }
 
+// Seed HOM_DEBUG once at load from the URL (?homly-debug[=verbose]) or localStorage
+// (HOM_DEBUG), unless it's already set on the global (an inline script wins). Priming
+// it here lets the very first hydration see the flag; everything else reads it live
+// via Homly._level().
+(() => {
+  if (globalThis.HOM_DEBUG !== undefined) return;
+  let raw;
+  try {
+    const qs = new URLSearchParams(globalThis.location?.search || '');
+    if (qs.has('homly-debug')) raw = qs.get('homly-debug') || 'true';
+    else raw = globalThis.localStorage?.getItem('HOM_DEBUG') ?? undefined;
+  } catch (_) { /* sandboxed / no DOM: stay off */ }
+  if (raw == null) return;
+  const v = String(raw).toLowerCase();
+  if (v === 'verbose') globalThis.HOM_DEBUG = 'verbose';
+  else if (v === 'false' || v === '0' || v === '') { /* explicit off */ }
+  else globalThis.HOM_DEBUG = true;
+})();
+
 /**
  * Base class for Homly components. Extend it and override the getters
  * (`templateUrl`, `styleUrl`/`styles`, `basePath`, `store`, `actions`) and the
@@ -414,6 +472,7 @@ export class HomlyComponent extends HTMLElement {
    * @returns {Promise<void>}
    */
   async _hydrate() {
+    const _t0 = performance.now();
     const resolve = (path) => (this.basePath ? new URL(path, this.basePath).href : path);
 
     // Smart hydration: only fetch the HTML if the element is empty; if it already
@@ -446,6 +505,13 @@ export class HomlyComponent extends HTMLElement {
       }
     }
 
+    if (Homly._level()) {
+      const _s = this.store;
+      if (_s !== undefined && _s !== this.store) {
+        Homly._warn(this.localName + ': store no memoizado (devuelve una instancia nueva por acceso) — usá get store(){ return this._store ??= … }');
+      }
+    }
+
     // Wire the DOM to reactivity: shared (global) stores first, then the local store.
     if (this.globalStores) {
       this.globalStores.forEach(gStore => Homly.bindView(this, gStore, this.signal));
@@ -458,11 +524,13 @@ export class HomlyComponent extends HTMLElement {
     // `onMount` runs once but `onActivate` runs again every time the element is
     // shown back; here we fire the first one (re-activations come from the router).
     if (this.onActivate) this.onActivate();
+    if (Homly._level()) Homly._log('⬆', this.localName + ' hydrated in ' + (performance.now() - _t0).toFixed(1) + 'ms');
   }
 
   /** Lifecycle hook: abort all subscriptions/listeners and call `onUnmount` if defined. */
   disconnectedCallback() {
     this.controller.abort();
+    if (Homly._level()) Homly._log('✕', this.localName + ' unmount');
     if (this.onUnmount) this.onUnmount();
   }
 
@@ -566,6 +634,7 @@ export class HomlyRouter {
    */
   async handleRoute(path) {
     const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
+    if (Homly._level()) Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path);
     if (route.loader) await route.loader();
 
     // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
@@ -581,11 +650,13 @@ export class HomlyRouter {
       prev.scrollY = window.scrollY;
       prev.el.style.display = 'none';
       prev.el.onDeactivate?.();
+      if (Homly._level()) Homly._log('⏸', prev.el.localName + ' deactivate');
     }
 
     // Show the incoming route: create it the first time, reuse it afterwards.
     let entry = this.alive.get(path);
     const isNew = !entry;
+    if (Homly._level()) Homly._log(isNew ? '▷' : '▶', 'keep-alive ' + (isNew ? 'MISS' : 'HIT') + ' ' + path);
     if (isNew) {
       const el = document.createElement(route.tag);   // connectedCallback → onMount() → onActivate()
       this.root.appendChild(el);
@@ -598,6 +669,7 @@ export class HomlyRouter {
     const y = entry.scrollY;
     requestAnimationFrame(() => window.scrollTo(0, y));
     if (!isNew) entry.el.onActivate?.();               // re-activation (first one came from connectedCallback)
+    if (!isNew && Homly._level()) Homly._log('▶', entry.el.localName + ' activate');
     this.current = path;
   }
 
@@ -610,6 +682,7 @@ export class HomlyRouter {
     const entry = this.alive.get(path);
     if (entry) {
       entry.el.remove();
+      if (Homly._level()) Homly._log('✕', 'evict ' + path);
       this.alive.delete(path);
       if (this.current === path) this.current = null;
     }
