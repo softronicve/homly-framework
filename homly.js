@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.8.1
+ * @version 1.8.2
  * @license MIT
  */
 
@@ -466,7 +466,7 @@ export class HomlyComponent extends HTMLElement {
     try {
       await this._hydrate();
     } catch (err) {
-      console.error(`[homly] fallo montando <${this.tagName.toLowerCase()}>`, err);
+      console.error(`[homly] fallo montando <${this.localName}>`, err);
       this.renderError(err);
     }
   }
@@ -651,13 +651,11 @@ export class HomlyRouter {
       && this.root.firstElementChild
       && this.root.firstElementChild.localName === route.tag;
     this._hasHydrated = true;
+    if (adopt && Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
 
     // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
     if (!this.keepAlive) {
-      if (adopt) {
-        if (Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
-        return;                                       // adopt: don't wipe, keep scroll
-      }
+      if (adopt) return;                              // adopt: don't wipe, keep scroll
       this.root.innerHTML = `<${route.tag}></${route.tag}>`;
       window.scrollTo(0, 0);
       return;
@@ -680,7 +678,6 @@ export class HomlyRouter {
       let el;
       if (adopt) {
         el = this.root.firstElementChild;             // adopt the prerendered element (already in the DOM)
-        if (Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
       } else {
         el = document.createElement(route.tag);        // connectedCallback → onMount() → onActivate()
         this.root.appendChild(el);

@@ -1,6 +1,6 @@
 {
   "name": "homly-framework",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Micro-framework de Web Components con reactividad por señales. Vanilla JS, sin dependencias ni build.",
   "type": "module",
   "main": "homly.js",

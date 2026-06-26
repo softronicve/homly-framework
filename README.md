@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.1/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.2/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.1/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.2/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.8.1`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.8.2`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -112,6 +112,32 @@ store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
   inicial, si el outlet ya contiene el elemento de la ruta (HTML prerenderizado), el
   router lo **adopta** y lo hidrata en lugar de recrearlo (automático, sin config);
   navegaciones posteriores recrean/keep-alivean como siempre.
+
+## Valores vs efectos: `computed`, binding o `subscribe`
+
+La pregunta que decide la herramienta: **¿el cálculo vuelve al sistema reactivo/DOM, o sale hacia afuera?**
+
+- **Derivar un valor** (que vas a mostrar) → `computed` + `data-bind`. Ej.: `precioVes = precio × rate`.
+- **Reflejarlo en la vista** → directivas declarativas (`data-bind`, `data-if`, `data-bind-class`, `data-for`…).
+- **Correr un efecto** hacia algo que NO es homly (una librería externa, una API del browser, la red, `localStorage`) → suscribite a la señal con `this.signal` (auto-cleanup):
+
+```js
+onMount() {
+  // re-centrar un mapa de Leaflet (objeto NO-homly) cuando cambian las coords
+  this.store.signals.coords.subscribe(c => this.map.setView([c.lat, c.lng]), this.signal);
+}
+```
+
+`subscribe(fn, this.signal)` se autolimpia al desmontar (cero leaks) y es **eager**: corre una vez al suscribir + en cada cambio.
+
+| Necesidad | El resultado va a… | Herramienta |
+|---|---|---|
+| Recalcular un precio cuando cambia la tasa | tu DOM | `computed` + `data-bind` |
+| Mostrar/ocultar una sección | tu DOM | `data-if` |
+| Re-centrar un mapa de Leaflet | un objeto externo | `subscribe` |
+| `document.title`, analytics, `localStorage` | browser / red | `subscribe` |
+
+No hay (ni hace falta) un `onUpdate`: **los valores los hace `computed`, la vista los bindings, y el efecto imperativo —el caso raro— es una línea de `subscribe`.**
 
 ## Detalles
 
