@@ -112,6 +112,7 @@ export class Homly {
          */
         set: (newVal) => {
           if (value === newVal) return;
+          if (Homly._level() === 'verbose') Homly._log('✎', 'signal ' + key + ': ' + Homly._fmt(value) + ' → ' + Homly._fmt(newVal));
           value = newVal;
           subscribers[key].forEach(fn => fn(value));
         },
@@ -142,7 +143,7 @@ export class Homly {
      * @returns {{ subscribe: Function, get: Function, set: Function }} The computed.
      */
     store.computed = (name, depKeys, fn) => {
-      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn);
+      const derived = Homly.computed(depKeys.map((key) => signals[key]), fn, undefined, name);
       signals[name] = derived;
       return derived;
     };
@@ -160,10 +161,11 @@ export class Homly {
    * @param {Array<{ subscribe: Function, get: Function }>} deps - Source signals.
    * @param {(...values: *[]) => *} fn - Pure function of the deps' current values.
    * @param {AbortSignal} [abortSignal] - When aborted, unsubscribes from the deps.
+   * @param {string} [label] - Optional name for verbose dev logs (set by store.computed).
    * @returns {{ subscribe: Function, get: Function, set: Function }} A read-only
    *   signal — its `set` throws, since computeds are derived, not written by hand.
    */
-  static computed(deps, fn, abortSignal) {
+  static computed(deps, fn, abortSignal, label) {
     const subscribers = new Set();
     const evaluate = () => fn(...deps.map((dep) => dep.get()));
     let value = evaluate();
@@ -171,6 +173,7 @@ export class Homly {
     const recompute = () => {
       const next = evaluate();
       if (next === value) return;
+      if (Homly._level() === 'verbose') Homly._log('↳', 'computed ' + (label ? label + ' ' : '') + 'recompute: ' + Homly._fmt(value) + ' → ' + Homly._fmt(next));
       value = next;
       subscribers.forEach((notify) => notify(value));
     };
