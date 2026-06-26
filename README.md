@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.7.0/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.7.0/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.7.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.8.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -106,7 +106,10 @@ store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
 - `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>` y permite
   lazy loading por ruta. Con `new HomlyRouter('root', { keepAlive: true })` conserva
   el DOM/estado/scroll de cada ruta visitada (la oculta en vez de destruirla) y llama
-  a `onActivate`/`onDeactivate`; `evict(path)` la descarga de la cache.
+  a `onActivate`/`onDeactivate`; `evict(path)` la descarga de la cache. En la carga
+  inicial, si el outlet ya contiene el elemento de la ruta (HTML prerenderizado), el
+  router lo **adopta** y lo hidrata en lugar de recrearlo (automático, sin config);
+  navegaciones posteriores recrean/keep-alivean como siempre.
 
 ## Detalles
 

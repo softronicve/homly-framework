@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.7.0
+ * @version 1.8.0
  * @license MIT
  */
 
@@ -628,7 +628,9 @@ export class HomlyRouter {
 
   /**
    * Resolve a route: run its lazy loader (if any), then render its tag into root.
-   * Falls back to a `/404` route or an empty `<div>`.
+   * On the initial resolution, adopts a matching prerendered element already in
+   * the outlet (hydrating it in place) instead of recreating it; locked to the
+   * first call. Falls back to a `/404` route or an empty `<div>`.
    * @param {string} path
    * @returns {Promise<void>}
    */
@@ -637,8 +639,20 @@ export class HomlyRouter {
     if (Homly._level()) Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path);
     if (route.loader) await route.loader();
 
+    // Adopt prerendered DOM on the initial route resolution: if the loader's
+    // define() just upgraded an element already in the outlet (smart hydration
+    // wired it), reuse it instead of wiping. Locked to the first call.
+    const adopt = !this._hasHydrated
+      && this.root.firstElementChild
+      && this.root.firstElementChild.localName === route.tag;
+    this._hasHydrated = true;
+
     // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
     if (!this.keepAlive) {
+      if (adopt) {
+        if (Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
+        return;                                       // adopt: don't wipe, keep scroll
+      }
       this.root.innerHTML = `<${route.tag}></${route.tag}>`;
       window.scrollTo(0, 0);
       return;
@@ -658,16 +672,25 @@ export class HomlyRouter {
     const isNew = !entry;
     if (Homly._level()) Homly._log(isNew ? '▷' : '▶', 'keep-alive ' + (isNew ? 'MISS' : 'HIT') + ' ' + path);
     if (isNew) {
-      const el = document.createElement(route.tag);   // connectedCallback → onMount() → onActivate()
-      this.root.appendChild(el);
+      let el;
+      if (adopt) {
+        el = this.root.firstElementChild;             // adopt the prerendered element (already in the DOM)
+        if (Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
+      } else {
+        el = document.createElement(route.tag);        // connectedCallback → onMount() → onActivate()
+        this.root.appendChild(el);
+      }
       entry = { el, scrollY: 0 };
       this.alive.set(path, entry);
     }
     entry.el.style.display = '';
     // Restore scroll on the next frame: scrolling synchronously right after the
     // display change clamps against a stale (not-yet-reflowed) document height.
-    const y = entry.scrollY;
-    requestAnimationFrame(() => window.scrollTo(0, y));
+    // On adoption we keep the entry scroll (deep-link / browser restore).
+    if (!adopt) {
+      const y = entry.scrollY;
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
     if (!isNew) entry.el.onActivate?.();               // re-activation (first one came from connectedCallback)
     if (!isNew && Homly._level()) Homly._log('▶', entry.el.localName + ' activate');
     this.current = path;
