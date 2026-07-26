@@ -26,7 +26,28 @@ La rama `main` está protegida: **todo cambio entra por Pull Request** y lo vali
 
 ## Probar los cambios
 
-Todavía no hay framework de tests: probá el componente en un navegador real (cargá una página que lo use y verificá render, reactividad y que no haya errores en consola).
+```bash
+npm test
+```
+
+Corre los checks con el `assert` de Node: sin dependencias, sin build, sin CI. Cada archivo de `tests/` protege una pieza distinta:
+
+| Archivo | Qué protege |
+|---|---|
+| `route-match.test.js` | matcheo de rutas, prioridad estática sobre dinámica, dedupe del prefetch, qué clicks toma el router |
+| `resource.test.js` | carreras de respuestas, debounce, abort, error conservando el último valor bueno |
+| `query.test.js` | ida y vuelta URL ↔ store, casteo de tipos, botón atrás |
+| `list-item.test.js` | de qué fila de `data-for` salió un `data-action` |
+
+Lo que necesita DOM real vive en `tests/index.html`: se autoverifica al abrirlo y además lista los checks manuales (rutas con params, prefetch, inyección).
+
+```bash
+python3 -m http.server 8000    # y abrir http://localhost:8000/tests/
+```
+
+Además, probá el cambio en un navegador real: cargá una página que lo use y verificá render, reactividad y que no haya errores en consola.
+
+**Qué merece un test:** lo que falla en silencio — un parser, una carrera asíncrona, un casteo de tipos. Un one-liner no lo necesita. No hay framework de tests y no hace falta uno: si un check necesita más andamiaje que el `assert` de Node, probablemente el diseño se pueda simplificar.
 
 ## Commits y PRs
 
