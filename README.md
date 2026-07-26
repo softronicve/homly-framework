@@ -68,6 +68,9 @@ customElements.define('mi-contador', Contador);
 - `data-if="clave"` — muestra u oculta según el valor.
 - `data-bind-class="clase:clave"` — agrega o quita una clase.
 - `data-bind-attr="atributo:clave"` — enlaza un atributo (por ejemplo `href`).
+- `data-model="clave"` — enlace de doble vía en `input`, `textarea`, `select` y checkbox:
+  la señal escribe el control y el control escribe la señal (`change` en `select` y
+  checkbox, `input` en el resto). En un checkbox se enlaza `checked`, no `value`.
 - `data-action="nombre"` — conecta un click a `actions[nombre]`.
 - `data-loading-text="…"` — mientras una acción asíncrona corre, el framework gestiona solo el estado de carga del control: lo deshabilita, le agrega la clase `is-loading` y, si tiene `data-loading-text`, le pone ese texto. Al terminar, restaura el estado (el texto solo se restaura si la acción no lo cambió ella misma). No hace falta tocar el botón a mano.
 - `data-for="clave"` en un `<template>` — renderiza una lista desde un array del
