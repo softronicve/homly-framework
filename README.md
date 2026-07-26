@@ -451,6 +451,20 @@ Para un panel de administración (o cualquier SPA con muchas secciones) el patr�
 
 [**homly.world**](https://homly.world) — la landing del CRM inmobiliario Homly está hecha íntegramente con homly.js: Web Components, reactividad por señales, code splitting por ruta y CSS aislado con `@scope`, sin build. El código es abierto: [github.com/softronicve/homly-landing](https://github.com/softronicve/homly-landing).
 
+## Tests
+
+```bash
+npm test
+```
+
+102 checks con el `assert` de Node: sin dependencias, sin build, sin CI. Cubren lo que
+falla en silencio —el matcheo de rutas, las carreras de respuestas de `resource`, el
+casteo de tipos de `bindQuery`— y no mucho más.
+
+Lo que necesita DOM real se autoverifica al abrir `tests/index.html` con cualquier
+servidor estático. En las [guías de contribución](CONTRIBUTING.md) está el detalle de
+qué protege cada archivo y qué merece un test.
+
 ## 🤝 Contribuir
 
 ¡Las contribuciones son bienvenidas! La rama `main` está protegida: todo cambio entra por Pull Request.
