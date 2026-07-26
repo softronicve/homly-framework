@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.2/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.9.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.8.2/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.9.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.8.2`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fijá siempre una versión (`@v1.9.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -68,6 +68,9 @@ customElements.define('mi-contador', Contador);
 - `data-if="clave"` — muestra u oculta según el valor.
 - `data-bind-class="clase:clave"` — agrega o quita una clase.
 - `data-bind-attr="atributo:clave"` — enlaza un atributo (por ejemplo `href`).
+- `data-model="clave"` — enlace de doble vía en `input`, `textarea`, `select` y checkbox:
+  la señal escribe el control y el control escribe la señal (`change` en `select` y
+  checkbox, `input` en el resto). En un checkbox se enlaza `checked`, no `value`.
 - `data-action="nombre"` — conecta un click a `actions[nombre]`.
 - `data-loading-text="…"` — mientras una acción asíncrona corre, el framework gestiona solo el estado de carga del control: lo deshabilita, le agrega la clase `is-loading` y, si tiene `data-loading-text`, le pone ese texto. Al terminar, restaura el estado (el texto solo se restaura si la acción no lo cambió ella misma). No hace falta tocar el botón a mano.
 - `data-for="clave"` en un `<template>` — renderiza una lista desde un array del
@@ -77,6 +80,7 @@ customElements.define('mi-contador', Contador);
   reaccione, reasigná el array con una referencia nueva: `store.state.items = [...next]`.
   Cada ítem debe tener **un único elemento raíz** en el `<template>`; los hermanos de
   nivel superior se ignoran (con `HOM_DEBUG` el framework avisa si hay más de uno).
+  Un `data-action` adentro de la lista recibe su fila en `ctx.item` (ver abajo).
 
 ```html
 <!-- una lista reactiva: reusa nodos al cambiar el array -->
@@ -105,13 +109,249 @@ store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
   notifica solo si el resultado cambió. Como es una señal, se puede bindear igual.
 - `store.computed(nombre, [keys], fn)` — registra una computed como key del store,
   así `data-bind="nombre"` y `store.state.nombre` funcionan sin nada extra.
+- `store.resource(nombre, [keys], fetcher, opts)` — carga asíncrona como **tres** keys
+  del store: `nombre`, `nombreLoading` y `nombreError` (ver abajo).
+- `Homly.bindQuery(store, [keys], signal)` — espeja esas keys en el query string, así un
+  listado filtrado se puede compartir por URL y sobrevive un F5 (ver abajo).
+- `Homly.head({ title, description, … })` — título y `<meta>` de la pestaña al navegar.
+  **No es SEO** (ver abajo).
 - `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>` y permite
-  lazy loading por ruta. Con `new HomlyRouter('root', { keepAlive: true })` conserva
+  lazy loading por ruta. Las rutas aceptan segmentos `:param` (ver abajo).
+  Con `new HomlyRouter('root', { keepAlive: true })` conserva
   el DOM/estado/scroll de cada ruta visitada (la oculta en vez de destruirla) y llama
   a `onActivate`/`onDeactivate`; `evict(path)` la descarga de la cache. En la carga
   inicial, si el outlet ya contiene el elemento de la ruta (HTML prerenderizado), el
   router lo **adopta** y lo hidrata en lugar de recrearlo (automático, sin config);
   navegaciones posteriores recrean/keep-alivean como siempre.
+
+## Rutas con parámetros
+
+Una ruta puede llevar segmentos `:param`, y cada valor le llega al componente **como
+atributo**. No hay API nueva que aprender: se lee con `getAttribute`, que es lo que los
+Custom Elements ya hacen.
+
+```js
+router.add('/blog/:slug', 'blog-post', () => import('./blog-post.js'));
+```
+
+```js
+class BlogPost extends HomlyComponent {
+  get templateUrl() { return './blog-post.html'; }
+  onMount() {
+    const slug = this.getAttribute('slug');   // '/blog/hola-mundo' → 'hola-mundo'
+  }
+}
+```
+
+Reglas de matcheo:
+
+- **La ruta estática gana.** Con `/blog/nuevo` y `/blog/:slug` registradas, `/blog/nuevo`
+  resuelve al editor, no a un post con slug `nuevo`. El orden de registro no importa.
+- **La cantidad de segmentos tiene que coincidir.** `/blog/:slug` matchea `/blog/hola`,
+  pero no `/blog` ni `/blog/a/b`. Un segmento vacío (`/blog/`) tampoco matchea.
+- **El valor se decodifica**: `/buscar/caf%C3%A9` llega como `café`.
+- **Sin riesgo de inyección**: los params se aplican con `setAttribute`, que nunca
+  interpreta HTML. Igual, para escribirlos en la página usá `data-bind` o `textContent`.
+- **Los params van en minúscula.** HTML baja los nombres de atributo, así que
+  `/u/:userId` se lee con `getAttribute('userid')`. Usá kebab-case (`:user-id`); con
+  `HOM_DEBUG` el framework avisa al registrar la ruta.
+- **Con keep-alive, cada path es su propia entrada**: `/blog/a` y `/blog/b` conservan
+  su DOM y su estado por separado.
+- **Con DOM prerenderizado**, los atributos tienen que estar escritos en el markup
+  (`<blog-post slug="hola-mundo">`): cuando el router adopta el elemento, su `onMount`
+  ya corrió. Con `HOM_DEBUG` el framework avisa si falta alguno.
+
+El componente se monta de nuevo en cada navegación, así que `onMount` vuelve a leer el
+atributo. Si querés que una ruta cambie de param **sin** remontar (keep-alive de
+`/blog/a` a `/blog/b`), usá `observedAttributes` + `attributeChangedCallback`, que ya
+son parte de la plataforma.
+
+## Datos desde una API: `store.resource`
+
+`resource` registra una carga asíncrona como **tres claves** del store —el valor, un
+booleano de carga y el error— así que se bindean con las directivas que ya conocés,
+sin nada nuevo:
+
+```js
+get store() {
+  return (this._store ??= (() => {
+    const s = Homly.createStore({ q: '', orden: 'precio' });
+
+    s.resource('propiedades', ['q', 'orden'], (q, orden, { signal }) =>
+      fetch(`/api/propiedades?q=${encodeURIComponent(q)}&orden=${orden}`, { signal })
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        }),
+      { debounce: 300 },
+    );
+
+    return s;
+  })());
+}
+```
+
+```html
+<input data-model="q" placeholder="Buscar…">
+
+<p data-if="propiedadesLoading">Cargando…</p>
+<p data-if="propiedadesError" data-bind="propiedadesError"></p>
+
+<template data-for="propiedades" data-key="id">
+  <article><strong data-bind="titulo"></strong> — <span data-bind="precio"></span></article>
+</template>
+```
+
+Qué hace por vos:
+
+- **Se re-dispara solo** cuando cambia cualquiera de sus deps. Con `[]` carga una vez.
+- **Ninguna respuesta vieja pisa a una nueva.** Cada corrida aborta la anterior y lleva
+  un token; si la primera request tarda más que la segunda, se descarta. Es el bug que
+  aparece una de cada veinte búsquedas y que no se ve leyendo el código.
+- **El fetcher recibe un `{ signal }`** al final: pasáselo a `fetch` y el navegador
+  cancela de verdad la request abortada.
+- **En error conserva el último valor bueno.** Un refresh que falla no te blanquea la
+  lista que ya está en pantalla; `nombreError` te dice qué pasó.
+- **`debounce`** agrupa cambios rápidos (tipear en un filtro) en un solo request. La
+  primera carga nunca se retrasa.
+- **Devuelve `{ refresh }`** para un botón de reintentar.
+
+`fetch` no tira error con un 404 o un 500, así que **chequeá `response.ok` y lanzá vos**
+si querés que llegue a `nombreError`.
+
+Para filtrar del lado del cliente sin volver a pegarle a la API, poné una `computed`
+encima del resource:
+
+```js
+s.computed('visibles', ['propiedades', 'soloConFoto'],
+  (props, soloConFoto) => (props || []).filter(p => !soloConFoto || p.foto));
+```
+
+## Acciones por fila: `ctx.item`
+
+Un botón adentro de un `data-for` recibe la fila de la que salió en el contexto de la
+acción, sin tener que estampar ids en el markup y volver a leerlos con `closest`:
+
+```html
+<template data-for="propiedades" data-key="id">
+  <article>
+    <strong data-bind="titulo"></strong>
+    <button data-action="borrar" data-loading-text="Borrando…">Borrar</button>
+  </article>
+</template>
+```
+
+```js
+get actions() {
+  return {
+    borrar: async (target, { item }) => {
+      await fetch(`/api/propiedades/${item.state.id}`, { method: 'DELETE' });
+      const s = this.store;
+      s.state.propiedades = s.state.propiedades.filter(p => p.id !== item.state.id);
+    },
+  };
+}
+```
+
+- `ctx.item` es el **store de esa fila**, así que `item.state.campo` lee cualquiera de
+  sus campos (incluido el `data-index`, si lo declaraste).
+- Gana la fila **más cercana**: en una lista anidada, un click resuelve a la fila interna.
+- Una acción que no está dentro de ningún `data-for` no recibe `item` — el contexto
+  queda como siempre (`{ signal, host }`).
+- Escribir en `item.state` actualiza **solo esa fila**, útil para un cambio optimista
+  mientras corre el request. Ojo: no toca el array del store, así que el próximo cambio
+  del array lo pisa. Para que persista, reasigná el array.
+
+## Filtros en la URL: `Homly.bindQuery`
+
+Un listado filtrado que no se puede pasar por WhatsApp no sirve. `bindQuery` espeja las
+claves que le digas en el query string, en las dos direcciones:
+
+```js
+get store() {
+  return (this._store ??= (() => {
+    const s = Homly.createStore({ q: '', orden: 'fecha', pagina: 1, conFoto: false });
+
+    // ⚠️ Antes del resource: así el primer fetch ya usa los filtros de la URL.
+    Homly.bindQuery(s, ['q', 'orden', 'pagina', 'conFoto'], this.signal);
+
+    s.resource('propiedades', ['q', 'orden', 'pagina', 'conFoto'], (q, orden, pagina, conFoto, { signal }) =>
+      fetch(`/api/propiedades?${new URLSearchParams({ q, orden, pagina, conFoto })}`, { signal })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      { debounce: 300 },
+    );
+
+    return s;
+  })());
+}
+```
+
+Con eso, `/propiedades?q=casa&orden=precio` abre el listado ya filtrado, y tocar un filtro
+actualiza la URL sola.
+
+- **Los tipos se conservan.** La URL solo tiene strings, así que `bindQuery` castea según
+  el valor inicial de cada clave: `pagina: 1` vuelve como número, `conFoto: false` como
+  booleano. Sin eso, `pagina + 1` te daría `'21'`.
+- **Una clave en su default no ensucia la URL.** Un listado sin tocar queda en
+  `/propiedades`, no en `/propiedades?q=&orden=fecha&pagina=1`.
+- **Usa `replaceState`**, así tipear en un filtro no apila una entrada de historial por
+  tecla. Irte a otra ruta y volver con el botón atrás sí restaura los filtros.
+- **Una clave que desaparece de la URL vuelve a su default**, en vez de quedar pegada.
+- **Se limpia sola** con el `signal` del componente.
+
+## Título y meta al navegar: `Homly.head`
+
+```js
+onMount() {
+  Homly.head({
+    title: `${this.getAttribute('slug')} — homly`,
+    description: 'Un post del blog',
+    'og:image': '/img/portada.png',
+  });
+}
+```
+
+Crea cada tag la primera vez y lo actualiza después, así llamarlo en cada navegación no
+duplica nada. Un valor vacío borra el tag. Las claves `og:*` se escriben como `property`;
+el resto, como `name`.
+
+> ⚠️ **Esto no es SEO.** Los scrapers de WhatsApp, Twitter y Slack **no ejecutan
+> JavaScript**: un `og:image` puesto acá, después de hidratar, no existe para ellos. Para
+> que un link se previsualice bien y para que Google indexe, los tags tienen que venir en
+> el HTML que sirve el servidor — que es justo lo que el router sabe adoptar (ver
+> *prerender*). Lo que `head` sí arregla es que la pestaña y el historial digan lo
+> correcto mientras te movés por la SPA.
+
+## Varios sitios que se enlazan entre sí
+
+Un `data-router-link` que apunta a **otro dominio** el router lo deja pasar como
+navegación normal, en vez de romper con un `SecurityError` de `pushState`. Así un
+header compartido entre sitios hermanos puede llevar todos los links marcados igual:
+
+```html
+<nav>
+  <a href="/docs"                 data-router-link>Docs</a>      <!-- lo toma el router -->
+  <a href="https://homly.blog"    data-router-link>Blog</a>      <!-- navegación real -->
+  <a href="/guia.pdf" download    data-router-link>Guía</a>      <!-- descarga -->
+  <a href="/docs" target="_blank" data-router-link>Docs ↗</a>    <!-- pestaña nueva -->
+</nav>
+```
+
+También deja pasar ⌘/Ctrl/Shift/Alt+click y el click del medio, así "abrir en pestaña
+nueva" sigue funcionando en cualquier link del router.
+
+## Prefetch en hover
+
+Automático, sin configuración: pasar el mouse por un `<a data-router-link>` —o tabular
+hasta él— dispara el `import()` de esa ruta, así al hacer click el chunk ya está. Cada
+ruta se baja una sola vez, y un prefetch que falla se ignora (al navegar de verdad se
+reintenta).
+
+También lo podés llamar a mano para una ruta que sabés que sigue:
+
+```js
+router.prefetch('/checkout');
+```
 
 ## Valores vs efectos: `computed`, binding o `subscribe`
 

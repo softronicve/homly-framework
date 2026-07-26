@@ -6,7 +6,7 @@
  * with `data-*` attributes, and each component is a Custom Element that loads
  * its HTML and CSS from sibling files.
  *
- * @version 1.8.3
+ * @version 1.9.0
  * @license MIT
  */
 
@@ -27,6 +27,14 @@ export class Homly {
    * @type {Map<string, Promise<string>>}
    */
   static pendingRequests = new Map();
+
+  /**
+   * Row store for each node rendered by a `data-for`, so a `data-action` fired from
+   * inside a row can tell which item it belongs to. A WeakMap, so removing the row is
+   * enough to drop the entry — no bookkeeping on teardown.
+   * @type {WeakMap<HTMLElement, Object>}
+   */
+  static listItems = new WeakMap();
 
   /**
    * Fetch a text resource (an HTML template or a CSS file), cached by URL.
@@ -87,22 +95,29 @@ export class Homly {
    */
   static createStore(initialState) {
     const signals = {};
-    const subscribers = {};
 
-    for (const key in initialState) {
-      let value = initialState[key];
-      subscribers[key] = new Set();
+    /**
+     * Create a writable signal under `key`. Used for the initial state and by
+     * `store.resource`, which registers its own keys after the store exists.
+     *
+     * @param {string} key - Store key the signal is exposed under.
+     * @param {*} initial - Starting value.
+     * @returns {{ subscribe: Function, set: Function, get: Function }}
+     */
+    const addSignal = (key, initial) => {
+      const subscribers = new Set();
+      let value = initial;
 
-      signals[key] = {
+      return (signals[key] = {
         /**
          * Subscribe to changes of this key. Runs immediately with the current value.
          * @param {(value: *) => void} fn - Callback invoked on every change.
          * @param {AbortSignal} [abortSignal] - When aborted, removes the subscription.
          */
         subscribe: (fn, abortSignal) => {
-          subscribers[key].add(fn);
+          subscribers.add(fn);
           if (abortSignal) {
-            abortSignal.addEventListener('abort', () => subscribers[key].delete(fn), { once: true });
+            abortSignal.addEventListener('abort', () => subscribers.delete(fn), { once: true });
           }
           fn(value);
         },
@@ -114,12 +129,14 @@ export class Homly {
           if (value === newVal) return;
           if (Homly._level() === 'verbose') Homly._log('✎', 'signal ' + key + ': ' + Homly._fmt(value) + ' → ' + Homly._fmt(newVal));
           value = newVal;
-          subscribers[key].forEach(fn => fn(value));
+          subscribers.forEach(fn => fn(value));
         },
         /** @returns {*} The current value. */
         get: () => value,
-      };
-    }
+      });
+    };
+
+    for (const key in initialState) addSignal(key, initialState[key]);
 
     // Proxy so the store can be read/written as `store.state.key`.
     const stateProxy = new Proxy({}, {
@@ -146,6 +163,75 @@ export class Homly {
       const derived = Homly.computed(depKeys.map((key) => signals[key]), fn, undefined, name);
       signals[name] = derived;
       return derived;
+    };
+
+    /**
+     * Register an async resource as **three** keys of this store: `name` (the value),
+     * `name + 'Loading'` (boolean) and `name + 'Error'` (the thrown error, or null).
+     * They are plain signals, so `data-for="items"`, `data-if="itemsLoading"` and
+     * `data-bind="itemsError"` work with no new directives.
+     *
+     * The fetcher re-runs whenever a dep changes. Each run aborts the previous one and
+     * carries a token, so **a late response can never overwrite a newer one** — the
+     * classic bug of a slow first request landing after a fast second one.
+     *
+     * On failure the error is published and the last good value is kept, so a flaky
+     * refresh doesn't blank out a list that is already on screen.
+     *
+     * @param {string} name - Key for the value; `${name}Loading` / `${name}Error` come along.
+     * @param {string[]} depKeys - Keys of this store the fetcher depends on. `[]` loads once.
+     * @param {(...values: *[]) => Promise<*>} fetcher - Receives the deps' values plus a
+     *   trailing `{ signal }` to hand to `fetch`. Throw to populate `${name}Error`
+     *   (`fetch` does not throw on a 4xx/5xx — check `response.ok` yourself).
+     * @param {{ debounce?: number }} [opts] - `debounce` in ms groups rapid dep changes
+     *   into a single request (typing in a filter). The first load is never delayed.
+     * @returns {{ refresh: () => Promise<void> }} `refresh` re-runs it by hand (retry buttons).
+     */
+    store.resource = (name, depKeys, fetcher, { debounce = 0 } = {}) => {
+      const data = addSignal(name, null);
+      const loading = addSignal(name + 'Loading', false);
+      const error = addSignal(name + 'Error', null);
+
+      let controller = null;
+      let timer = null;
+      let token = 0;
+
+      const run = async () => {
+        controller?.abort();
+        controller = new AbortController();
+        const mine = ++token;
+        const { signal } = controller;
+
+        loading.set(true);
+        try {
+          const value = await fetcher(...depKeys.map((key) => signals[key].get()), { signal });
+          if (mine !== token) return;              // llegó tarde: ya hay otro run en curso
+          error.set(null);
+          data.set(value);
+        } catch (err) {
+          if (mine !== token || signal.aborted) return;   // abortado por nosotros, no es un fallo
+          if (Homly._level()) Homly._warn('resource ' + name + ': ' + err.message);
+          error.set(err);
+        } finally {
+          if (mine === token) loading.set(false);
+        }
+      };
+
+      const trigger = debounce
+        ? () => { clearTimeout(timer); timer = setTimeout(run, debounce); }
+        : run;
+
+      // subscribe() es eager, así que dispararía un run por cada dep al registrarse.
+      // Se ignoran esas primeras llamadas y se hace un único run inicial, sin debounce.
+      let primed = false;
+      depKeys.forEach((key) => signals[key].subscribe(() => { if (primed) trigger(); }));
+      primed = true;
+      run();
+
+      // ponytail: un fetch en vuelo no se aborta al desmontar. El store local muere con el
+      // componente y la respuesta cae en el vacío; si algún día hace falta cortarlo antes,
+      // el hook es pasar this.signal acá y encadenarlo al controller.
+      return { refresh: run };
     };
 
     return store;
@@ -322,6 +408,7 @@ export class Homly {
             wrapper.appendChild(tpl.content.cloneNode(true));
             Homly.bindView(wrapper, itemStore, controller.signal);
             const node = wrapper.firstElementChild;
+            Homly.listItems.set(node, itemStore);   // para que las acciones sepan de qué fila salieron
             entry = { node, itemStore, controller };
             rendered.set(k, entry);
           }
@@ -339,6 +426,135 @@ export class Homly {
         for (const entry of rendered.values()) entry.controller.abort();
       }, { once: true });
     });
+  }
+
+  /**
+   * Keep a set of store keys in sync with the URL's query string, so a filtered list
+   * has a shareable address and survives a reload.
+   *
+   * Runs URL → store immediately, so call it **before** `store.resource(...)`: that way
+   * the first request already uses the filters from the URL instead of fetching with the
+   * defaults and then refetching.
+   *
+   * The value written back is typed after the store's initial value: a key that starts
+   * as a number comes back as a number, and one that starts as a boolean comes back as a
+   * boolean. Without that, `pagina` would return from the URL as the string `'2'` and
+   * `pagina + 1` would quietly produce `'21'`.
+   *
+   * Keys sitting at their default are dropped from the URL, so a pristine view stays a
+   * clean `/propiedades` instead of `/propiedades?q=&orden=precio`.
+   *
+   * Updates use `replaceState`: typing in a filter must not stack one history entry per
+   * keystroke. Navigating away and coming back still restores the filters, because the
+   * URL was replaced in place and `popstate` re-reads it.
+   *
+   * @param {{ signals: Object, state: Object }} store - Store from {@link Homly.createStore}.
+   * @param {string[]} keys - Store keys to mirror in the query string.
+   * @param {AbortSignal} [signal] - Aborted on disconnect; drops the listeners.
+   */
+  static bindQuery(store, keys, signal) {
+    const defaults = {};
+    for (const key of keys) {
+      if (store.signals[key]) defaults[key] = store.signals[key].get();
+      else if (Homly._level()) Homly._warn("bindQuery: no existe la señal '" + key + "' en el store");
+    }
+
+    const cast = (key, raw) => {
+      const def = defaults[key];
+      if (typeof def === 'number') return Number(raw);
+      if (typeof def === 'boolean') return raw !== 'false';
+      return raw;
+    };
+
+    // URL → store. Una clave ausente vuelve a su default (así el botón atrás limpia
+    // un filtro que ya no está en la URL, en vez de dejarlo pegado).
+    const read = () => {
+      const qs = new URLSearchParams(location.search);
+      for (const key in defaults) {
+        store.signals[key].set(qs.has(key) ? cast(key, qs.get(key)) : defaults[key]);
+      }
+    };
+
+    // store → URL.
+    const write = () => {
+      const qs = new URLSearchParams(location.search);
+      for (const key in defaults) {
+        const value = store.signals[key].get();
+        if (value === defaults[key] || value === '' || value == null || value === false) qs.delete(key);
+        else qs.set(key, value);
+      }
+      const search = qs.toString();
+      const next = location.pathname + (search ? '?' + search : '') + location.hash;
+      if (next !== location.pathname + location.search + location.hash) {
+        history.replaceState(history.state, '', next);
+      }
+    };
+
+    read();
+
+    let primed = false;   // subscribe es eager: la primera llamada no es un cambio real
+    for (const key in defaults) store.signals[key].subscribe(() => { if (primed) write(); }, signal);
+    primed = true;
+
+    addEventListener('popstate', read);
+    signal?.addEventListener('abort', () => removeEventListener('popstate', read), { once: true });
+  }
+
+  /**
+   * Set the document title and `<meta>` tags, creating each tag the first time and
+   * updating it afterwards (so calling this on every navigation never duplicates them).
+   * A key with an empty or null value removes its tag.
+   *
+   * ⚠️ **This is not an SEO feature.** Social scrapers (WhatsApp, Twitter, Slack) don't
+   * run JavaScript, so a tag written here after hydration doesn't exist for them. For
+   * link previews and indexing, the tags have to be in the HTML the server sends — which
+   * is what the router's prerender adoption is for. What this *does* fix is the browser
+   * tab and the history entry saying the right thing while you move around the SPA.
+   *
+   * `og:*` keys are written as `property`, everything else as `name`, matching what the
+   * Open Graph and Twitter specs expect.
+   *
+   * @param {Object<string, ?string>} tags - `title` sets `document.title`; every other
+   *   key becomes a `<meta>` tag, e.g. `{ title, description, 'og:image' }`.
+   */
+  static head(tags) {
+    for (const key in tags) {
+      const value = tags[key];
+
+      if (key === 'title') {
+        if (value != null) document.title = value;
+        continue;
+      }
+
+      const attr = key.startsWith('og:') ? 'property' : 'name';
+      let tag = document.head.querySelector('meta[' + attr + '="' + key + '"]');
+
+      if (value == null || value === '') {
+        tag?.remove();
+        continue;
+      }
+      if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute(attr, key);
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute('content', value);
+    }
+  }
+
+  /**
+   * Find the `data-for` row a node belongs to: the nearest ancestor (the node itself
+   * included) that {@link Homly.bindList} registered. Nearest wins, so a click inside a
+   * nested list resolves to the inner row, not the outer one.
+   *
+   * @param {HTMLElement} el - Node the event came from.
+   * @returns {?Object} The row's store, or undefined when the node isn't inside a list.
+   */
+  static _itemFor(el) {
+    for (let node = el; node; node = node.parentElement) {
+      const item = Homly.listItems.get(node);
+      if (item) return item;
+    }
   }
 
   /**
@@ -379,6 +595,10 @@ export class Homly {
    * text is only restored if the action did not change it itself — so a handler
    * can leave a final label (e.g. "Sent!") and the framework won't overwrite it.
    *
+   * When the click came from inside a `data-for` row, the row's store is added to the
+   * context as `item`, so a per-row button knows what it operates on without stamping
+   * ids on the markup and reading them back.
+   *
    * @param {HTMLElement} container - Element the listener is attached to.
    * @param {Object<string, (target: HTMLElement, context: Object) => void>} actions - Handlers by action name.
    * @param {{ signal?: AbortSignal, host?: HTMLElement }} [context] - Passed as the second argument to each handler.
@@ -391,6 +611,9 @@ export class Homly {
       const action = actions[actionName];
       if (!action) return;
 
+      const item = Homly._itemFor(target);
+      const ctx = item ? { ...context, item } : context;
+
       const loadingText = target.getAttribute('data-loading-text');
       const originalText = target.textContent;
       const isControl = target.tagName === 'BUTTON' || target.tagName === 'INPUT';
@@ -400,7 +623,7 @@ export class Homly {
       target.classList.add('is-loading');
 
       try {
-        await action(target, context);
+        await action(target, ctx);
       } finally {
         if (isControl) target.disabled = false;
         target.classList.remove('is-loading');
@@ -581,6 +804,10 @@ export class HomlyComponent extends HTMLElement {
  * intercepts `<a data-router-link>` clicks, and supports per-route lazy loading
  * (code splitting).
  *
+ * Routes can carry `:param` segments (`/blog/:slug`). Static routes always win over
+ * dynamic ones, and each matched param is handed to the component as an attribute
+ * (`<blog-post slug="hola-mundo">`) — no new API to learn, just `this.getAttribute()`.
+ *
  * With `{ keepAlive: true }` each visited route's element is kept mounted and
  * toggled with `display` instead of being destroyed: returning to a route is
  * instant, with its DOM, state and scroll preserved. The router calls the
@@ -599,27 +826,150 @@ export class HomlyRouter {
     this.keepAlive = keepAlive;
     /** @type {Map<string, { el: HTMLElement, scrollY: number }>} */
     this.alive = new Map();
+    /** @type {Set<Object>} Routes already prefetched, so a hover only downloads once. */
+    this.prefetched = new Set();
     this.current = null;
 
     window.addEventListener('popstate', () => this.handleRoute(window.location.pathname));
 
     document.body.addEventListener('click', e => {
       const link = e.target.closest('a[data-router-link]');
-      if (link) {
-        e.preventDefault();
-        this.navigate(link.getAttribute('href'));
-      }
+      if (!link || !HomlyRouter._handles(e, link)) return;
+      e.preventDefault();
+      this.navigate(link.getAttribute('href'));
     });
+
+    // Prefetch on hover (and on focus, so tabbing gets the same head start): by the
+    // time the click lands, the route's chunk is usually already there. One delegated
+    // listener each, not one per link — links come and go with every navigation.
+    for (const type of ['pointerover', 'focusin']) {
+      document.body.addEventListener(type, e => {
+        const link = e.target.closest?.('a[data-router-link]');
+        if (link && link.origin === location.origin) this.prefetch(link.pathname);
+      });
+    }
   }
 
   /**
-   * Register a route.
-   * @param {string} path - URL path (e.g. `/contact`).
+   * Whether the router should take over this click, or step aside and let the browser
+   * navigate on its own.
+   *
+   * It steps aside for:
+   *  - **Another origin.** `pushState` to a different origin throws a SecurityError, so a
+   *    shared nav that points at sibling sites has to fall through to a real navigation.
+   *  - **`target` or `download`.** The author already said where this should open.
+   *  - **A modified or non-primary click.** ⌘/Ctrl/Shift-click and middle-click mean
+   *    "new tab/window", and swallowing them is the fastest way to feel broken.
+   *
+   * @param {MouseEvent} e - The click.
+   * @param {HTMLAnchorElement} link - The `a[data-router-link]` that was hit.
+   * @returns {boolean}
+   */
+  static _handles(e, link) {
+    return link.origin === location.origin
+      && !link.hasAttribute('target')
+      && !link.hasAttribute('download')
+      && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey
+      && (e.button ?? 0) === 0;
+  }
+
+  /**
+   * Run a route's lazy loader ahead of time. Called on hover/focus, and safe to call by
+   * hand for a route you know is coming next.
+   *
+   * Each route is prefetched at most once; templates and CSS are already deduped by
+   * {@link Homly.loadTemplate}. A prefetch that fails is swallowed on purpose — it is
+   * best-effort, and navigating there for real runs the loader again.
+   *
+   * @param {string} path - Path to warm up.
+   */
+  prefetch(path) {
+    const { route } = this._resolve(path);
+    if (!route.loader || this.prefetched.has(route)) return;
+
+    this.prefetched.add(route);
+    if (Homly._level()) Homly._log('⇢', 'prefetch ' + path);
+    Promise.resolve(route.loader()).catch(() => {});
+  }
+
+  /**
+   * Register a route. The path may contain `:param` segments (`/blog/:slug`), whose
+   * values are passed to the component as attributes.
+   *
+   * @param {string} path - URL path (e.g. `/contact`, `/blog/:slug`).
    * @param {string} componentTag - Custom element tag to render (e.g. `homly-contact-page`).
    * @param {?(() => Promise<*>)} [loader] - Optional dynamic import run before render (code splitting).
    */
   add(path, componentTag, loader = null) {
+    // HTML lowercases attribute names, so `:userId` would only be readable as
+    // getAttribute('userid') — a silent miss. Warn once, at registration.
+    if (Homly._level() && /:[^/]*[A-Z]/.test(path)) {
+      Homly._warn('ruta "' + path + '": los params con mayúsculas se leen en minúscula '
+        + "(getAttribute('userid'), no 'userId') — usá kebab-case");
+    }
     this.routes[path] = { tag: componentTag, loader };
+  }
+
+  /**
+   * Match a path against a route pattern with `:param` segments. Pure and DOM-free
+   * on purpose, so the matching rules can be unit-tested outside a browser.
+   *
+   * Segment counts must be equal, so `/blog/:slug` matches `/blog/hola` but neither
+   * `/blog` nor `/blog/a/b`. An empty segment (`/blog/`) does not match either.
+   *
+   * @param {string} pattern - e.g. `/blog/:slug`.
+   * @param {string} path - e.g. `/blog/hola-mundo`.
+   * @returns {?Object<string, string>} Decoded params, or null when it doesn't match.
+   */
+  static matchRoute(pattern, path) {
+    const pat = pattern.split('/');
+    const seg = path.split('/');
+    if (pat.length !== seg.length) return null;
+
+    const params = {};
+    for (let i = 0; i < pat.length; i++) {
+      if (pat[i][0] === ':') {
+        if (!seg[i]) return null;                        // `/blog/` no es un slug válido
+        params[pat[i].slice(1)] = decodeURIComponent(seg[i]);
+      } else if (pat[i] !== seg[i]) {
+        return null;
+      }
+    }
+    return params;
+  }
+
+  /**
+   * Resolve a path: exact match first (so a static route always beats a dynamic one),
+   * then the registered `:param` patterns in declaration order, then `/404`.
+   *
+   * @param {string} path
+   * @returns {{ route: { tag: string, loader: ?Function }, params: Object<string, string>, pattern: ?string }}
+   */
+  _resolve(path) {
+    if (this.routes[path]) return { route: this.routes[path], params: {}, pattern: path };
+
+    for (const pattern in this.routes) {
+      if (!pattern.includes(':')) continue;
+      const params = HomlyRouter.matchRoute(pattern, path);
+      if (params) return { route: this.routes[pattern], params, pattern };
+    }
+
+    return { route: this.routes['/404'] || { tag: 'div', loader: null }, params: {}, pattern: null };
+  }
+
+  /**
+   * Build the route's element with its params as attributes. `setAttribute` never
+   * parses HTML, so a path segment can't inject markup the way an interpolated
+   * `innerHTML` string could.
+   *
+   * @param {string} tag
+   * @param {Object<string, string>} params
+   * @returns {HTMLElement}
+   */
+  static _create(tag, params) {
+    const el = document.createElement(tag);
+    for (const key in params) el.setAttribute(key, params[key]);
+    return el;
   }
 
   /**
@@ -643,10 +993,14 @@ export class HomlyRouter {
     // In-page `#hash` links fire popstate with the *same* pathname. Re-rendering
     // and resetting scroll here would cancel the browser's native anchor scroll,
     // so bail when the resolved route hasn't changed (the first call always runs).
-    if (this._resolved === path) return;
-    this._resolved = path;
-    const route = this.routes[path] || this.routes['/404'] || { tag: 'div', loader: null };
-    if (Homly._level()) Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path);
+    if (this._lastPath === path) return;
+    this._lastPath = path;
+
+    const { route, params, pattern } = this._resolve(path);
+    if (Homly._level()) {
+      Homly._log('⚡', 'route ' + (this.current ?? '∅') + ' → ' + path
+        + (pattern && pattern !== path ? ' (' + pattern + ')' : ''));
+    }
     if (route.loader) await route.loader();
 
     // Adopt prerendered DOM on the initial route resolution: if the loader's
@@ -656,12 +1010,22 @@ export class HomlyRouter {
       && this.root.firstElementChild
       && this.root.firstElementChild.localName === route.tag;
     this._hasHydrated = true;
-    if (adopt && Homly._level()) Homly._log('⚓', 'adopt ' + route.tag);
+    if (adopt && Homly._level()) {
+      Homly._log('⚓', 'adopt ' + route.tag);
+      // The element was already upgraded (and onMount already ran) by the time we get
+      // here, so we can't back-fill its params: prerendered markup has to carry them.
+      for (const key in params) {
+        if (!this.root.firstElementChild.hasAttribute(key)) {
+          Homly._warn('adopt ' + route.tag + ': falta el atributo "' + key
+            + '" en el HTML prerenderizado — escribilo en el markup');
+        }
+      }
+    }
 
     // Default: destroy and recreate (fires onUnmount → onMount on every navigation).
     if (!this.keepAlive) {
       if (adopt) return;                              // adopt: don't wipe, keep scroll
-      this.root.innerHTML = `<${route.tag}></${route.tag}>`;
+      this.root.replaceChildren(HomlyRouter._create(route.tag, params));
       window.scrollTo(0, 0);
       return;
     }
@@ -684,7 +1048,7 @@ export class HomlyRouter {
       if (adopt) {
         el = this.root.firstElementChild;             // adopt the prerendered element (already in the DOM)
       } else {
-        el = document.createElement(route.tag);        // connectedCallback → onMount() → onActivate()
+        el = HomlyRouter._create(route.tag, params);   // connectedCallback → onMount() → onActivate()
         this.root.appendChild(el);
       }
       entry = { el, scrollY: 0 };
