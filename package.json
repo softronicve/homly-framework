@@ -1,18 +1,34 @@
 {
   "name": "homly-framework",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Micro-framework de Web Components con reactividad por señales. Vanilla JS, sin dependencias ni build.",
   "type": "module",
   "main": "homly.js",
   "exports": "./homly.js",
-  "files": ["homly.js"],
+  "files": [
+    "homly.js",
+    "homly.min.js"
+  ],
   "license": "MIT",
   "scripts": {
-    "test": "node tests/route-match.test.js && node tests/resource.test.js && node tests/query.test.js && node tests/list-item.test.js"
+    "test": "node tests/route-match.test.js && node tests/resource.test.js && node tests/query.test.js && node tests/list-item.test.js && node tests/load-template.test.js && node tests/debug-mode.test.js && node tests/store.test.js && node tests/errors.test.js",
+    "test:browser": "node tests/run-browser.mjs",
+    "test:php": "php tests/render.test.php && php conformance/run.php",
+    "test:all": "npm test && npm run test:browser && npm run test:php",
+    "size": "npx --yes esbuild@0.28.2 homly.js --minify --format=esm | gzip -9 | wc -c"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/softronicve/homly-framework.git"
   },
-  "keywords": ["web-components", "vanilla-js", "signals", "reactive", "no-build"]
+  "keywords": [
+    "web-components",
+    "vanilla-js",
+    "signals",
+    "reactive",
+    "no-build"
+  ],
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
 }

@@ -1,0 +1,149 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — dispatcher: eventos, ctx.event/formData, preventDefault, host más interno, homly:action-error</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola. Usa eventos
+  confiables (<code>real</code>) para click, teclado y change.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly } from '../../homly.js';
+  import { runChecks, tick, real } from './_harness.js';
+
+  /**
+   * Guarda de seguridad para los checks de `submit`: bloquea la navegación real de
+   * VERDAD (vía el prototipo, sin pasar por lo que homly pueda o no llamar) y por
+   * separado deja anotado si `event.preventDefault()` se llamó — así el check puede
+   * verificar el comportamiento del dispatcher sin arriesgarse a que la página navegue
+   * si el fix estuviera roto.
+   */
+  const guardSubmit = (form) => {
+    let called = false;
+    form.addEventListener('submit', (e) => {
+      Event.prototype.preventDefault.call(e);         // nunca navega, pase lo que pase
+      e.preventDefault = () => { called = true; };     // homly llama a ESTA versión
+    }, true);
+    return () => called;
+  };
+
+  window.__homly_results = runChecks('dispatch', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // --- bare "nombre" (sin flecha) sigue siendo click, retrocompat 1.9 -----------
+    {
+      stage.innerHTML = '<button id="btn1" data-action="sumar">+1</button>';
+      let calls = 0;
+      Homly.attachDispatcher(stage, { sumar: () => { calls++; } });
+      await real.click('#btn1');
+      check('data-action="nombre" (sin evento) sigue disparando en click', calls === 1);
+    }
+
+    // --- submit->accion: preventDefault por defecto + ctx.event + ctx.formData ----
+    {
+      stage.innerHTML = '<form id="frm" data-action="submit->guardar">'
+        + '<input name="nombre" value="Ana"><button type="submit" id="send">enviar</button></form>';
+      const wasPrevented = guardSubmit(stage.querySelector('#frm'));
+      let seenEvent = null, seenFormData = null;
+      Homly.attachDispatcher(stage, {
+        guardar: (target, ctx) => { seenEvent = ctx.event; seenFormData = ctx.formData; },
+      });
+      await real.click('#send');
+      await tick();
+      check('submit->accion corre con un evento submit real', seenEvent?.type === 'submit');
+      check('homly llama a preventDefault por defecto (no hay recarga)', wasPrevented());
+      check('ctx.formData trae los campos del <form>', seenFormData?.get('nombre') === 'Ana');
+    }
+
+    // --- data-action-default: opt-out de preventDefault ----------------------------
+    {
+      stage.innerHTML = '<form id="frm2" data-action="submit->noop" data-action-default>'
+        + '<button type="submit" id="send2">enviar</button></form>';
+      const wasPrevented = guardSubmit(stage.querySelector('#frm2'));
+      let ran = false;
+      Homly.attachDispatcher(stage, { noop: () => { ran = true; } });
+      await real.click('#send2');
+      await tick();
+      check('la acción igual corre', ran === true);
+      check('...pero con data-action-default, homly NO llama a preventDefault', !wasPrevented());
+    }
+
+    // --- keydown.tecla->accion, con evento de teclado confiable --------------------
+    {
+      stage.innerHTML = '<input id="inp" data-action="keydown.enter->enviar">';
+      let calls = 0;
+      Homly.attachDispatcher(stage, { enviar: () => { calls++; } });
+      await real.click('#inp');       // enfoca el input
+      await real.press('Enter');
+      check('keydown.enter->accion corre con Enter', calls === 1);
+
+      await real.type('#inp', 'x');   // una tecla que no es Enter: no dispara
+      check('otra tecla no dispara keydown.enter', calls === 1);
+    }
+
+    // --- change->accion en un <select> ---------------------------------------------
+    {
+      stage.innerHTML = '<select id="sel" data-action="change->cambiar">'
+        + '<option value="a">a</option><option value="b">b</option></select>';
+      let calls = 0;
+      Homly.attachDispatcher(stage, { cambiar: () => { calls++; } });
+      await real.select('#sel', 'b');
+      check('data-action="change->…" corre en un <select>', calls === 1);
+    }
+
+    // --- FIX DISPATCH-1: gana el host más interno -----------------------------------
+    {
+      stage.innerHTML = '<div id="outer" data-action="guardar"><div id="inner" data-action="guardar">'
+        + '<button id="btnNested">guardar</button></div></div>';
+      let outerCalls = 0, innerCalls = 0;
+      Homly.attachDispatcher(stage.querySelector('#inner'), { guardar: () => { innerCalls++; } });
+      Homly.attachDispatcher(stage.querySelector('#outer'), { guardar: () => { outerCalls++; } });
+      await real.click('#btnNested');
+      check('el host MÁS INTERNO corre su acción', innerCalls === 1);
+      check('...y el externo NO corre la suya (antes corría dos veces)', outerCalls === 0);
+    }
+
+    // --- estado de carga SOLO si la acción devuelve una promesa (P9) ----------------
+    {
+      stage.innerHTML = '<button id="syncBtn" data-action="syncAction" data-loading-text="Cargando…">Sync</button>'
+        + '<button id="asyncBtn" data-action="asyncAction" data-loading-text="Cargando…">Async</button>';
+      let sawLoadingSync = null;
+      let resolveAsync;
+      Homly.attachDispatcher(stage, {
+        syncAction: (target) => { sawLoadingSync = target.classList.contains('is-loading'); },
+        asyncAction: (target) => new Promise((r) => { resolveAsync = r; }),
+      });
+
+      await real.click('#syncBtn');
+      check('una acción síncrona nunca ve is-loading (no se marca antes de tiempo)', sawLoadingSync === false);
+      check('...y no queda marcada al terminar', !stage.querySelector('#syncBtn').classList.contains('is-loading'));
+
+      real.click('#asyncBtn');   // sin await: la promesa todavía no resolvió
+      await tick();
+      check('una acción asíncrona SÍ se marca is-loading mientras corre',
+        stage.querySelector('#asyncBtn').classList.contains('is-loading'));
+      resolveAsync();
+      await tick();
+      check('al resolver, is-loading se quita', !stage.querySelector('#asyncBtn').classList.contains('is-loading'));
+    }
+
+    // --- homly:action-error: throw sincrónico y promesa rechazada ------------------
+    {
+      stage.innerHTML = '<button id="boom1" data-action="boom1">boom1</button>'
+        + '<button id="boom2" data-action="boom2">boom2</button>';
+      const errors = [];
+      stage.addEventListener('homly:action-error', (e) => errors.push(e.detail));
+      Homly.attachDispatcher(stage, {
+        boom1: () => { throw new Error('sync boom'); },
+        boom2: async () => { throw new Error('async boom'); },
+      });
+      await real.click('#boom1');
+      await tick();
+      check('una acción que lanza sincrónico dispara homly:action-error',
+        errors.length === 1 && errors[0].name === 'boom1' && errors[0].error.message === 'sync boom');
+
+      await real.click('#boom2');
+      await tick();
+      check('una promesa rechazada también dispara homly:action-error',
+        errors.length === 2 && errors[1].name === 'boom2' && errors[1].error.message === 'async boom');
+    }
+  });
+</script>

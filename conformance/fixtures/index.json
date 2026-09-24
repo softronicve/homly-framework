@@ -1,0 +1,114 @@
+[
+    {
+        "name": "attr-blocked-scheme",
+        "mode": "template"
+    },
+    {
+        "name": "attr-bool-aria-false",
+        "mode": "template"
+    },
+    {
+        "name": "attr-bool-false-nonaria",
+        "mode": "template"
+    },
+    {
+        "name": "attr-bool-true",
+        "mode": "template"
+    },
+    {
+        "name": "attr-data-image-src",
+        "mode": "template"
+    },
+    {
+        "name": "attr-multi-pair",
+        "mode": "template"
+    },
+    {
+        "name": "attr-null",
+        "mode": "template"
+    },
+    {
+        "name": "attr-relative-url",
+        "mode": "template"
+    },
+    {
+        "name": "attr-single-href-safe",
+        "mode": "template"
+    },
+    {
+        "name": "bind-bool",
+        "mode": "template"
+    },
+    {
+        "name": "bind-missing-key",
+        "mode": "template"
+    },
+    {
+        "name": "bind-null",
+        "mode": "template"
+    },
+    {
+        "name": "bind-number",
+        "mode": "template"
+    },
+    {
+        "name": "bind-text",
+        "mode": "template"
+    },
+    {
+        "name": "class-multi",
+        "mode": "template"
+    },
+    {
+        "name": "class-single",
+        "mode": "template"
+    },
+    {
+        "name": "combined-card-list",
+        "mode": "template",
+        "action": {
+            "selector": "[data-homly-key=\"a1\"] [data-action=\"fav\"]",
+            "action": "fav",
+            "field": "fav",
+            "itemKey": "a1",
+            "before": false,
+            "after": true
+        }
+    },
+    {
+        "name": "for-basic",
+        "mode": "template"
+    },
+    {
+        "name": "for-empty",
+        "mode": "template"
+    },
+    {
+        "name": "for-missing-key-field-skipped",
+        "mode": "template"
+    },
+    {
+        "name": "for-nested",
+        "mode": "template"
+    },
+    {
+        "name": "for-row-attrs",
+        "mode": "template"
+    },
+    {
+        "name": "fragment-mode",
+        "mode": "fragment"
+    },
+    {
+        "name": "if-false",
+        "mode": "template"
+    },
+    {
+        "name": "if-missing-key",
+        "mode": "template"
+    },
+    {
+        "name": "if-true",
+        "mode": "template"
+    }
+]

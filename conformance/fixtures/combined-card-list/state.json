@@ -1,0 +1,20 @@
+{
+    "titulo": "Casas en Barquisimeto",
+    "vacio": false,
+    "items": [
+        {
+            "id": "a1",
+            "nombre": "Casa Este",
+            "foto": "/img/a1.webp",
+            "url": "/inmueble/a1",
+            "fav": false
+        },
+        {
+            "id": "b2",
+            "nombre": "Casa Oeste",
+            "foto": "/img/b2.webp",
+            "url": "/inmueble/b2",
+            "fav": true
+        }
+    ]
+}

@@ -1,0 +1,45 @@
+# homly.js
+
+> Micro-framework de Web Components con reactividad por señales. Vanilla JavaScript,
+> sin dependencias y sin paso de build: corre directo en el navegador. Versión: 1.10.0.
+
+homly.js define dos clases (`Homly`, con los helpers estáticos, y `HomlyComponent`, la
+base de los Custom Elements) y una tercera opcional (`HomlyRouter`, un router SPA). El
+estado es reactivo por señales; el DOM se enlaza con atributos `data-*`, nunca con
+expresiones ni `eval`. Hay un renderer PHP (`renderers/homly.php`) que implementa el
+mismo protocolo del lado del servidor, para SSR sin Node.
+
+## Reglas para un agente que genera código con homly.js
+
+1. Las plantillas HTML no llevan lógica: solo `data-bind`, `data-if`, `data-bind-attr`,
+   `data-bind-class`, `data-model`, `data-for` y `data-action`. Nunca interpoles datos
+   dentro de `template()` — eso es lo que `TPL-1`/`Homly.html` (aún no existe en 1.x)
+   advertiría; usa `data-bind`.
+2. `data-bind-attr`/`data-bind-class` aceptan varios pares separados por coma:
+   `"src:foto, alt:titulo"`. Un solo par por atributo era el límite antes de 1.10.
+3. `data-action` sin flecha es `click`. Con flecha (`evento->nombre` o
+   `evento.tecla->nombre`) puede ser `submit`, `change`, `input` o `keydown`. Un handler
+   recibe `(target, ctx)` con `ctx.event`, `ctx.item` (si está en un `data-for`) y
+   `ctx.formData` (en un `submit`).
+4. Un `<template data-for="clave" data-key="campo">` necesita SIEMPRE `data-key` — es un
+   error en tiempo de montaje si falta.
+5. Para reaccionar a un cambio de array, reasígnalo con una referencia nueva
+   (`store.state.items = [...next]`), nunca `.push`/`.splice` in-place.
+6. `store.resource` y `Homly.bindQuery` agrupan varios cambios del mismo tick en un solo
+   efecto (microtask) — no asumas que `nombreLoading` es `true` en el mismo tick que el
+   cambio que lo disparó, salvo `{ sync: true }`.
+7. Cada advertencia del runtime trae un código estable `[homly Hxxx]`; `errors.json` en
+   la raíz del repo tiene la lista completa.
+
+## Documentación completa
+
+- [README](https://github.com/softronicve/homly-framework/blob/main/README.md): API completa, ejemplos, SSR, dispatcher, estilos/CSP, router.
+- [llms-full.txt](https://github.com/softronicve/homly-framework/blob/main/llms-full.txt): el README y el código fuente completos, en un solo archivo, para pegar en el contexto de un agente.
+- [errors.json](https://github.com/softronicve/homly-framework/blob/main/errors.json): código → descripción de cada `[homly Hxxx]`.
+- [homly.js](https://github.com/softronicve/homly-framework/blob/main/homly.js): el código fuente, comentado; es la fuente de verdad por encima de este archivo.
+- [renderers/homly.php](https://github.com/softronicve/homly-framework/blob/main/renderers/homly.php): el mismo protocolo de directivas, del lado del servidor (PHP 8.4).
+
+## Optional
+
+- [CONTRIBUTING](https://github.com/softronicve/homly-framework/blob/main/CONTRIBUTING.md): estándares de código y qué merece un test.
+- [conformance/](https://github.com/softronicve/homly-framework/tree/main/conformance): fixtures que prueban que el cliente y `homly.php` producen el mismo HTML.

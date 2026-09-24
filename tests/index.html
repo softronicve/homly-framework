@@ -1,173 +1,69 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>homly — checks de router en el navegador</title>
+<title>homly — índice de tests de navegador</title>
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
-  nav a { margin-right: .75rem; }
-  #app { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
+  body { font: 15px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
   code { background: #f4f4f4; padding: .1em .35em; border-radius: 4px; }
-  ol { padding-left: 1.2rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  .cmd { display: block; margin: .5rem 0 1.25rem; }
 </style>
 
-<h1>Checks de router (T1 — params de ruta)</h1>
+<h1>Tests de navegador de homly.js</h1>
 
-<p>Servir desde la raíz del repo y abrir <code>/tests/</code>:<br>
-  <code>python3 -m http.server 8000</code> → <code>http://localhost:8000/tests/</code></p>
+<p>Estos checks necesitan un DOM real (ciclo de vida de Custom Elements, CSS, historial,
+  eventos confiables) y por eso no viven en <code>npm test</code> (que corre en Node, sin
+  navegador). La forma normal de correrlos es automática:</p>
 
-<p>Abrí la consola con <code>window.HOM_DEBUG = true</code> para ver los logs del router.</p>
+<code class="cmd">npm run test:browser</code>
 
-<nav>
-  <a href="/tests/blog" data-router-link>/blog</a>
-  <a href="/tests/blog/nuevo" data-router-link>/blog/nuevo</a>
-  <a href="/tests/blog/hola-mundo" data-router-link>/blog/hola-mundo</a>
-  <a href="/tests/blog/caf%C3%A9-con-leche" data-router-link>/blog/café-con-leche</a>
-  <a href="/tests/nada" data-router-link>/nada</a>
-</nav>
+<p>Eso abre cada archivo de abajo en Chrome (vía <code>tests/run-browser.mjs</code> +
+  puppeteer-core, solo de desarrollo) y falla si algo se rompe. Esta página es el índice
+  para abrir alguno a mano durante el desarrollo — cada uno corre solo al cargarlo y
+  escribe su resultado en la consola (<code>window.__homly_results</code>).</p>
 
-<div id="app"></div>
+<ul>
+  <li><a href="dom/lifecycle.html"><code>lifecycle.html</code></a> — ciclo de vida:
+    mover/reordenar no filtra ni re-monta (CORE-1/ROUTER-1); desmontar mientras carga
+    la plantilla no deja nada corriendo (CORE-11/ROUTER-6).</li>
+  <li><a href="dom/router.html"><code>router.html</code></a> — <code>navigate()</code> y
+    <code>homly:navigate</code>, misma URL → <code>replaceState</code>, token de
+    navegación, normalización de rutas, reintento tras un loader que falla,
+    <code>e.defaultPrevented</code>, adopción de prerender por params.</li>
+  <li><a href="dom/styles.html"><code>styles.html</code></a> — CSS con y sin soporte de
+    <code>@scope</code> (fallback a selector anidado).</li>
+  <li><a href="dom/security.html"><code>security.html</code></a> — allowlist de esquema
+    en <code>data-bind-attr</code> para atributos de URL, y denylist de <code>on*</code>/
+    <code>srcdoc</code>.</li>
+  <li><a href="dom/list-actions.html"><code>list-actions.html</code></a> — una acción
+    disparada desde una fila de <code>data-for</code> recibe el ítem de esa fila (y solo
+    esa); reentrancia (<code>is-loading</code> ignora un segundo click); texto de carga
+    que restaura nodos, no solo texto; <code>data-action="constructor"</code>.</li>
+  <li><a href="dom/list.html"><code>list.html</code></a> — <code>data-for</code>
+    anidado dentro de una fila; un campo que desaparece de un ítem se vacía; ítems
+    <code>null</code> o con clave duplicada no rompen el render.</li>
+  <li><a href="dom/model.html"><code>model.html</code></a> — <code>data-model</code>
+    por tipo de control: radios, number/range (<code>''</code> → <code>null</code>),
+    <code>select multiple</code>, grupo de checkboxes; <code>null</code> no se pinta
+    como texto; atributos boolean con semántica HTML nativa.</li>
+  <li><a href="dom/head.html"><code>head.html</code></a> — <code>Homly.head()</code>:
+    título, meta tags, <code>canonical</code>, JSON-LD, sin duplicarlos al repetir.</li>
+  <li><a href="dom/ssr.html"><code>ssr.html</code></a> — protocolo SSR: adopción de filas
+    por <code>data-homly-key</code>, siembra de estado, límite de componente.</li>
+  <li><a href="dom/conformance.html"><code>conformance.html</code></a> — el oráculo del
+    kit de conformidad: hidrata la salida de <code>renderers/homly.php</code> con 0
+    mutaciones.</li>
+  <li><a href="dom/dispatch.html"><code>dispatch.html</code></a> — dispatcher 1.10:
+    <code>data-action="evento->acción"</code>, <code>ctx.event</code>/<code>ctx.formData</code>,
+    <code>preventDefault</code> automático, host más interno, <code>homly:action-error</code>.</li>
+  <li><a href="dom/reconcile.html"><code>reconcile.html</code></a> — reconciliación de
+    <code>data-for</code> con LIS + <code>moveBefore</code>: cuenta operaciones DOM reales
+    (swap de 1.000 filas = 2 movimientos).</li>
+  <li><a href="dom/csp.html"><code>csp.html</code></a> — servida con
+    <code>style-src 'self'</code>: 0 violaciones con el modo de estilos compartido.</li>
+</ul>
 
-<h2>Checks automáticos (T4 acciones por fila · T5 head)</h2>
-<p>Corren solos al cargar la página. Necesitan DOM real, por eso no están en <code>npm test</code>.</p>
-<ul id="checks"></ul>
-<div id="sandbox" hidden></div>
-
-<h2>Qué verificar a mano</h2>
-<ol>
-  <li><b>Param.</b> <code>/blog/hola-mundo</code> muestra <code>slug = hola-mundo</code>.</li>
-  <li><b>Decodificado.</b> <code>/blog/café-con-leche</code> muestra el acento, no <code>%C3%A9</code>.</li>
-  <li><b>La estática gana.</b> <code>/blog/nuevo</code> muestra el editor, no el post con slug <code>nuevo</code>.</li>
-  <li><b>Sin match.</b> <code>/nada</code> cae al 404.</li>
-  <li><b>Keep-alive por path completo.</b> Escribí algo en el input de un post, navegá a otro post
-      y volvé: el texto sigue ahí, y <em>cada</em> slug conserva el suyo (son entradas distintas
-      de la cache, no una sola compartida).</li>
-  <li><b>Sin inyección.</b> Andá a <code>/tests/blog/&lt;img src=x onerror=alert(1)&gt;</code>:
-      tiene que verse como texto y no ejecutar nada.</li>
-  <li><b>Prefetch (T6).</b> Con <code>HOM_DEBUG</code> prendido, pasá el mouse por un link
-      del menú: sale <code>⇢ prefetch …</code> una vez. Pasá de nuevo por el mismo: no se
-      repite. Tabulá hasta un link con el teclado: también prefetchea.
-      <em>Nota:</em> en esta página las rutas no tienen loader, así que para verlo hay que
-      registrar una con <code>() =&gt; import(...)</code>.</li>
-</ol>
-
-<script type="module">
-  import { Homly, HomlyComponent, HomlyRouter } from '../homly.js';
-
-  class BlogIndex extends HomlyComponent {
-    get template() { return () => '<h2>Índice del blog</h2><p>Ruta estática, sin params.</p>'; }
-  }
-
-  class BlogNew extends HomlyComponent {
-    get template() { return () => '<h2>Editor</h2><p>Estática <code>/blog/nuevo</code>: le gana a <code>/blog/:slug</code>.</p>'; }
-  }
-
-  class BlogPost extends HomlyComponent {
-    get template() {
-      // textContent, no innerHTML: el valor viene de la URL.
-      return () => '<h2>Post</h2><p>slug = <b id="slug"></b></p>'
-        + '<p><input placeholder="escribí acá y navegá a otro post"></p>';
-    }
-    onMount() {
-      this.querySelector('#slug').textContent = this.getAttribute('slug');
-    }
-  }
-
-  class NotFound extends HomlyComponent {
-    get template() { return () => '<h2>404</h2><p>Ninguna ruta matcheó.</p>'; }
-  }
-
-  customElements.define('blog-index', BlogIndex);
-  customElements.define('blog-new', BlogNew);
-  customElements.define('blog-post', BlogPost);
-  customElements.define('not-found', NotFound);
-
-  // --- checks automáticos: contexto del ítem en las acciones (T4) -------------
-  const salida = document.getElementById('checks');
-  let fallos = 0;
-  const check = (nombre, ok) => {
-    const li = document.createElement('li');
-    li.textContent = (ok ? '✓ ' : '✗ ') + nombre;
-    li.style.color = ok ? 'green' : 'crimson';
-    salida.appendChild(li);
-    if (!ok) fallos++;
-  };
-  const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
-
-  class ListaDemo extends HomlyComponent {
-    get store() {
-      return (this._store ??= Homly.createStore({
-        items: [{ id: 1, titulo: 'uno' }, { id: 2, titulo: 'dos' }, { id: 3, titulo: 'tres' }],
-        ultimo: null,
-      }));
-    }
-    get template() {
-      return () => `
-        <template data-for="items" data-key="id">
-          <article><span data-bind="titulo"></span> <button data-action="borrar">×</button></article>
-        </template>
-        <button data-action="fuera" id="fuera">fuera de la lista</button>`;
-    }
-    get actions() {
-      const s = this.store;
-      return {
-        borrar: (_t, ctx) => {
-          s.state.ultimo = ctx.item.state.id;
-          s.state.items = s.state.items.filter((i) => i.id !== ctx.item.state.id);
-        },
-        fuera: (_t, ctx) => { s.state.ultimo = 'item' in ctx ? 'TIENE-ITEM' : 'sin-item'; },
-      };
-    }
-  }
-  customElements.define('lista-demo', ListaDemo);
-
-  (async () => {
-    const host = document.createElement('lista-demo');
-    document.getElementById('sandbox').appendChild(host);
-    await tick(50);
-
-    const titulos = () => [...host.querySelectorAll('article span')].map((s) => s.textContent);
-    check('renderiza las 3 filas', titulos().join(',') === 'uno,dos,tres');
-
-    host.querySelectorAll('article button')[1].click();
-    await tick();
-    check('la acción recibe el ítem de SU fila', host._store.state.ultimo === 2);
-    check('borra la fila correcta', titulos().join(',') === 'uno,tres');
-
-    host.querySelectorAll('article button')[1].click();   // ahora es "tres"
-    await tick();
-    check('sigue resolviendo bien después de reordenar', host._store.state.ultimo === 3);
-    check('queda una sola fila', titulos().join(',') === 'uno');
-
-    host.querySelector('#fuera').click();
-    await tick();
-    check('una acción fuera de data-for no recibe item', host._store.state.ultimo === 'sin-item');
-
-    // --- Homly.head (T5) ------------------------------------------------------
-    const meta = (attr, key) => document.head.querySelectorAll(`meta[${attr}="${key}"]`);
-
-    Homly.head({ title: 'Primero', description: 'uno', 'og:image': '/a.png' });
-    check('setea el título', document.title === 'Primero');
-    check('crea el meta description', meta('name', 'description')[0]?.content === 'uno');
-    check('og: usa property, no name', meta('property', 'og:image')[0]?.content === '/a.png');
-
-    Homly.head({ title: 'Segundo', description: 'dos' });
-    check('actualiza el título', document.title === 'Segundo');
-    check('no duplica el meta al repetir', meta('name', 'description').length === 1);
-    check('actualiza el contenido', meta('name', 'description')[0].content === 'dos');
-
-    Homly.head({ description: '' });
-    check('un valor vacío borra el tag', meta('name', 'description').length === 0);
-
-    Homly.head({ description: 'tres' });
-    check('y se puede volver a crear', meta('name', 'description')[0].content === 'tres');
-
-    check('TOTAL', fallos === 0);
-  })();
-
-  const router = new HomlyRouter('app', { keepAlive: true });
-  router.add('/tests/', 'blog-index');
-  router.add('/tests/blog', 'blog-index');
-  router.add('/tests/blog/nuevo', 'blog-new');
-  router.add('/tests/blog/:slug', 'blog-post');
-  router.add('/404', 'not-found');
-  router.start();
-</script>
+<p>Para ver los logs del router mientras navegas a mano, abre la consola y pon
+  <code>window.HOM_DEBUG = true</code> (o <code>'verbose'</code>) antes de cargar la
+  página — nunca por <code>?homly-debug=verbose</code> en la URL: ese nivel no expone
+  valores de señales (ver DEBUG-1).</p>

@@ -172,4 +172,99 @@ const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
     'el filtro es sincrónico: no vuelve a pegarle a la API');
 }
 
-console.log('✓ resource: 28 checks OK');
+// --- FIX CORE-22a: una dep que no existe falla alto y claro, sin registrar nada -----
+{
+  const store = Homly.createStore({ q: 'a' });
+  assert.throws(
+    () => store.resource('items', ['q', 'noExiste'], async () => []),
+    /H202/,
+    'el mensaje trae el código para ubicarlo',
+  );
+  assert.equal(store.signals.items, undefined, 'no queda "items" registrado a medias');
+  assert.equal(store.signals.itemsLoading, undefined);
+  assert.equal(store.signals.itemsError, undefined);
+}
+
+// --- FIX CORE-22a: refresh() cancela un debounce pendiente, no dispara dos veces ---
+{
+  const store = Homly.createStore({ q: '' });
+  let calls = 0;
+  const items = store.resource('items', ['q'], async () => { calls++; return [calls]; }, { debounce: 30 });
+  await tick();
+  assert.equal(calls, 1, 'la carga inicial no espera el debounce');
+
+  store.state.q = 'c';               // encola un run a los 30ms
+  await items.refresh();             // dispara ya mismo y debería cancelar el pendiente
+  assert.equal(calls, 2, 'refresh() corrió una vez más, ya');
+
+  await tick(50);                    // si el timer viejo sigue vivo, aquí aparecería un 3er call
+  assert.equal(calls, 2, 'el debounce pendiente no disparó un tercer request');
+}
+
+// --- FIX SSR-1: { initial } sembrado salta el primer fetch automático ---------------
+{
+  const store = Homly.createStore({ q: 'a' });
+  let calls = 0;
+  const items = store.resource('items', ['q'], async (q) => { calls++; return ['fetched-' + q]; }, { initial: ['seeded'] });
+
+  assert.deepEqual(store.state.items, ['seeded'], 'arranca con el valor sembrado, sin esperar un tick');
+  assert.equal(store.state.itemsLoading, false, 'no queda cargando: no hay fetch en vuelo');
+  await tick();
+  assert.equal(calls, 0, 'el primer fetch automático no corrió');
+
+  store.state.q = 'b';                // un cambio de dep SÍ dispara el fetch normal
+  await tick();
+  assert.equal(calls, 1, 'una dep que cambia sigue disparando fetch');
+  assert.deepEqual(store.state.items, ['fetched-b']);
+
+  await items.refresh();
+  assert.equal(calls, 2, 'refresh() también funciona igual que siempre');
+}
+
+// --- FIX SSR-1: { initial: null } cuenta como sembrado (no es "sin initial") --------
+{
+  const store = Homly.createStore({ q: 'a' });
+  let calls = 0;
+  store.resource('items', ['q'], async () => { calls++; return ['x']; }, { initial: null });
+  assert.equal(store.state.items, null, 'null sembrado se respeta tal cual');
+  await tick();
+  assert.equal(calls, 0, 'un initial explícitamente null también salta el primer fetch');
+}
+
+// --- FIX PERF-5/CORE-9: varias deps cambiadas en el mismo tick ⇒ un solo run --------
+{
+  const store = Homly.createStore({ q: '', orden: 'precio', pagina: 1 });
+  const calls = [];
+  store.resource('items', ['q', 'orden', 'pagina'], async (q, orden, pagina) => {
+    calls.push(q + '/' + orden + '/' + pagina);
+    return [];
+  });
+  await tick();
+  assert.deepEqual(calls, ['/precio/1'], 'carga inicial: un solo run');
+
+  store.state.q = 'casa';
+  store.state.orden = 'fecha';
+  store.state.pagina = 2;               // "limpiar filtros" de un solo golpe: 3 deps
+  // Batcheado: el run recién arranca en el microtask siguiente, no en este mismo tick.
+  assert.equal(store.state.itemsLoading, false, 'loading NO cambia todavía en este mismo tick (recién en el microtask)');
+  await tick();
+  assert.deepEqual(calls, ['/precio/1', 'casa/fecha/2'],
+    'UN solo run con el estado FINAL, no tres corridas (dos abortadas)');
+}
+
+// --- FIX PERF-5: { sync: true } vuelve al disparo inmediato (sin microtask) ---------
+{
+  const store = Homly.createStore({ q: 'a' });
+  const calls = [];
+  store.resource('items', ['q'], async (q) => { calls.push(q); return [q]; }, { sync: true });
+  await tick();
+  assert.deepEqual(calls, ['a']);
+
+  store.state.q = 'b';
+  // Sin esperar ni un tick: con { sync: true } el run ya arrancó en el mismo tick.
+  assert.equal(store.state.itemsLoading, true, 'con sync:true, loading ya está en true sin esperar un microtask');
+  await tick();
+  assert.deepEqual(calls, ['a', 'b']);
+}
+
+console.log('✓ resource: 51 checks OK');

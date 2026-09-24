@@ -15,7 +15,7 @@ La idea es simple:
 No hay nada que instalar ni compilar. Puedes cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
-import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.9.0/homly.js';
+import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.10.0/homly.js';
 ```
 
 O, para no repetir la URL en cada componente, declara un import map en tu `index.html` y usa un specifier corto:
@@ -23,7 +23,7 @@ O, para no repetir la URL en cada componente, declara un import map en tu `index
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script type="importmap">
-{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.9.0/homly.js" } }
+{ "imports": { "homly": "https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.10.0/homly.js" } }
 </script>
 ```
 
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declara un import map en tu `index
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fija siempre una versión (`@v1.9.0`); evita `@latest` o `@main` en producción, porque cambian sin aviso. También puedes descargar `homly.js` y servirlo desde tu propio dominio.
+Fija siempre una versión (`@v1.10.0`); evita `@latest` o `@main` en producción, porque cambian sin aviso. También puedes descargar `homly.js` (o `homly.min.js`, la misma versión minificada que se publica en cada tag) y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -66,13 +66,18 @@ customElements.define('mi-contador', Contador);
 
 - `data-bind="clave"` — escribe el valor de la señal en el texto del elemento.
 - `data-if="clave"` — muestra u oculta según el valor.
-- `data-bind-class="clase:clave"` — agrega o quita una clase.
-- `data-bind-attr="atributo:clave"` — enlaza un atributo (por ejemplo `href`).
+- `data-bind-class="clase:clave"` — agrega o quita una clase. Acepta varios pares
+  separados por coma: `data-bind-class="activo:esActivo, destacado:esDestacado"`.
+- `data-bind-attr="atributo:clave"` — enlaza un atributo (por ejemplo `href`). También
+  acepta varios pares: `data-bind-attr="src:foto, alt:titulo"`.
 - `data-model="clave"` — enlace de doble vía en `input`, `textarea`, `select` y checkbox:
   la señal escribe el control y el control escribe la señal (`change` en `select` y
   checkbox, `input` en el resto). En un checkbox se enlaza `checked`, no `value`.
-- `data-action="nombre"` — conecta un click a `actions[nombre]`.
-- `data-loading-text="…"` — mientras una acción asíncrona corre, el framework gestiona solo el estado de carga del control: lo deshabilita, le agrega la clase `is-loading` y, si tiene `data-loading-text`, le pone ese texto. Al terminar, restaura el estado (el texto solo se restaura si la acción no lo cambió ella misma). No hace falta tocar el botón a mano.
+- `data-action="[evento[.tecla]->]nombre"` — conecta un evento a `actions[nombre]`. Sin
+  flecha (`data-action="nombre"`) es `click`, igual que siempre. Con flecha, cualquiera
+  de `click`, `submit`, `change`, `input` o `keydown` (`keydown.enter->enviar` solo corre
+  con esa tecla). Ver la sección de eventos, abajo.
+- `data-loading-text="…"` — mientras una acción asíncrona corre, el framework gestiona solo el estado de carga del control: lo deshabilita, le agrega la clase `is-loading` y, si tiene `data-loading-text`, le pone ese texto. Al terminar, restaura el estado (el texto solo se restaura si la acción no lo cambió ella misma). No hace falta tocar el botón a mano. Si la acción es síncrona (no devuelve una promesa), este estado ni se activa.
 - `data-for="clave"` en un `<template>` — renderiza una lista desde un array del
   store. Requiere `data-key="campo"` (identidad para reusar nodos al cambiar el
   array) y acepta `data-index="i"` (expone el índice 0-based, reactivo). Adentro,
@@ -110,11 +115,20 @@ store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
 - `store.computed(nombre, [keys], fn)` — registra una computed como key del store,
   así `data-bind="nombre"` y `store.state.nombre` funcionan sin nada extra.
 - `store.resource(nombre, [keys], fetcher, opts)` — carga asíncrona como **tres** keys
-  del store: `nombre`, `nombreLoading` y `nombreError` (ver abajo).
+  del store: `nombre`, `nombreLoading` y `nombreError` (ver abajo). Varias keys que
+  cambian en el mismo tick se agrupan en **un solo** fetch (microtask); `{ sync: true }`
+  vuelve al disparo inmediato de antes de 1.10.
 - `Homly.bindQuery(store, [keys], signal)` — espeja esas keys en el query string, así un
-  listado filtrado se puede compartir por URL y sobrevive un F5 (ver abajo).
-- `Homly.head({ title, description, … })` — título y `<meta>` de la pestaña al navegar.
-  **No es SEO** (ver abajo).
+  listado filtrado se puede compartir por URL y sobrevive un F5 (ver abajo). Igual que
+  `resource`, varios cambios en el mismo tick se agrupan en un solo `replaceState`.
+- `Homly.head({ title, description, canonical, jsonld, … })` — título, `<link
+  rel=canonical>`, JSON-LD y `<meta>` de la pestaña al navegar. **No es SEO** (ver abajo).
+- `el.ready` / evento `homly:hydrated` — en cualquier `HomlyComponent`: la promesa se
+  resuelve (y el evento se dispara, con `bubbles: true`) justo después de `onMount`/
+  `onActivate`, útil para una isla que espera a que otra termine de hidratar.
+- `Homly.messages.loadError` — el texto del error boundary (`renderError`); reasignalo
+  para traducirlo o cambiar el tono. `Homly.styleMode = 'inline'` y `Homly.styleNonce`
+  controlan cómo se inyecta el CSS de los componentes (ver *Estilos y CSP*, abajo).
 - `HomlyRouter` — router SPA mínimo. Intercepta `<a data-router-link>` y permite
   lazy loading por ruta. Las rutas aceptan segmentos `:param` (ver abajo).
   Con `new HomlyRouter('root', { keepAlive: true })` conserva
@@ -202,7 +216,7 @@ get store() {
 </template>
 ```
 
-Qué hace por vos:
+Qué hace por ti:
 
 - **Se re-dispara solo** cuando cambia cualquiera de sus deps. Con `[]` carga una vez.
 - **Ninguna respuesta vieja sobrescribe a una nueva.** Cada ejecución aborta la anterior y lleva
@@ -214,6 +228,11 @@ Qué hace por vos:
   lista que ya está en pantalla; `nombreError` te dice qué pasó.
 - **`debounce`** agrupa cambios rápidos (tipear en un filtro) en un solo request. La
   primera carga nunca se retrasa.
+- **Varias deps cambiadas en el mismo tick disparan un solo fetch** (con el estado
+  final, no uno por cada asignación intermedia) — el efecto es un microtask después del
+  cambio, así que `nombreLoading` pasa a `true` recién ahí, no en el mismo tick.
+  `{ sync: true }` vuelve al disparo inmediato (pre-1.10) si necesitas leer `loading`
+  sincrónico justo después de cambiar una dep.
 - **Devuelve `{ refresh }`** para un botón de reintentar.
 
 `fetch` no lanza error con un 404 o un 500, así que **verifica `response.ok` y lanza tú**
@@ -226,6 +245,99 @@ encima del resource:
 s.computed('visibles', ['propiedades', 'soloConFoto'],
   (props, soloConFoto) => (props || []).filter(p => !soloConFoto || p.foto));
 ```
+
+## SSR sin Node: adopción, siembra y `renderers/homly.php`
+
+homly.js puede hidratar HTML que un servidor ya renderizó, sin refetch y sin
+recrear nodos — protocolo pensado para un backend PHP (u otro), no para Node:
+
+- **El host se marca con `data-homly-ssr`.** Tiene prioridad sobre la heurística de
+  "¿ya tiene hijos?": aunque el contenido renderizado quede vacío (una lista sin
+  resultados, por ejemplo), el componente nunca refetchea su plantilla.
+- **`Homly.bindList` adopta las filas** que el servidor marcó con
+  `data-homly-key="<clave>"`, ubicadas justo después del `<template>` y en el mismo
+  orden que el array inicial del store. Son los **mismos nodos** — no se clonan —, y sus
+  directivas quedan atadas al store *de esa fila*, no al del host.
+- **`Homly.initial(host, defaults)`** lee el `<script type="application/json"
+  data-homly-state>` hijo directo del host y superpone sus valores sobre `defaults`,
+  **solo en las claves que ya declaraste**: una clave del JSON que el componente no
+  espera no entra al store.
+
+  ```js
+  get store() {
+    return (this._store ??= Homly.createStore(
+      Homly.initial(this, { titulo: '', propiedades: [] }),
+    ));
+  }
+  ```
+
+- **`store.resource(nombre, deps, fetcher, { initial })`** — con `initial` presente
+  (incluso `null`), arranca con ese valor y **no dispara el primer fetch**; los cambios
+  de dependencias posteriores sí refetchean, igual que siempre.
+
+  ```js
+  const seed = Homly.initial(this, {});
+  const s = Homly.createStore({});
+  s.resource('propiedades', ['q'], fetcher,
+    'propiedades' in seed ? { initial: seed.propiedades } : {});
+  ```
+
+- **Límite de componente:** `bindView`/`bindList` nunca alcanzan el markup de un
+  componente anidado — cada `HomlyComponent` bindea solo lo suyo, aunque comparta el DOM
+  ligero con su padre (homly no usa Shadow DOM). Esto es lo que hace seguro adoptar HTML
+  con componentes hijos ya prerenderizados.
+
+**`renderers/homly.php`** (PHP 8.4, `Dom\HTMLDocument`, sin dependencias) es la mitad
+servidor del mismo protocolo: rellena `data-bind`/`data-if`/`data-bind-attr`/
+`data-bind-class`/`data-for` contra un array de estado, marca cada fila con
+`data-homly-key` y conserva el `<template>` para que el cliente la adopte.
+
+```php
+use Homly\Render;
+
+echo Render::template($html, [
+    'titulo' => 'Casas en Barquisimeto',
+    'items' => [/* … */],
+]);
+// ::fragment($html, $state) hace lo mismo sin la isla de estado — para embeber
+// dentro de una página/componente cuyo store ya la trae sembrada.
+```
+
+`conformance/` tiene el kit que prueba que ambos lados están de acuerdo: más de 20
+fixtures (`template.html` + `state.json` + `expected.html`), un runner
+(`php conformance/run.php`) que re-renderiza cada una y la compara byte a byte contra
+el `expected.html` commiteado, y el oráculo `tests/dom/conformance.html`, que hidrata
+esos mismos `expected.html` con homly.js y confirma cero mutaciones, el estado leído
+del DOM igual al `state.json` y la interacción funcionando.
+
+## Eventos: `data-action="evento->acción"`
+
+Sin flecha, `data-action="nombre"` sigue siendo `click`, igual que en versiones
+anteriores. Con flecha, cualquier evento del DOM sirve — los que más se usan son
+`submit`, `change`, `input` y `keydown` (con un modificador de tecla):
+
+```html
+<form data-action="submit->guardar">
+  <input name="nombre" data-action="keydown.enter->enviar">
+  <select data-action="change->filtrar">…</select>
+</form>
+```
+
+- **`ctx.event`** es el evento real (antes solo llegaban `target` y `ctx`): `ctx.event.key`,
+  `ctx.event.target`, etc.
+- **`ctx.formData`** — en un `submit`, `new FormData(target)` ya armado.
+- **`preventDefault` es automático** cuando hay un handler para el evento: un `<form
+  data-action="submit->guardar">` no recarga la página, un `<a href data-action="click->favorito">`
+  no navega. Para el caso raro donde SÍ quieres el comportamiento nativo además de tu
+  handler, agrega `data-action-default` al elemento.
+- **Gana el host más interno.** Un botón dentro de una tarjeta, dentro de una página, con
+  la misma acción `guardar` en ambos niveles: solo corre el de la tarjeta (antes corría
+  en los dos).
+- **El estado de carga (`is-loading`, `data-loading-text`, deshabilitar el control) solo
+  se activa si la acción devuelve una `Promise`.** Un handler síncrono no lo dispara.
+- **`homly:action-error`** se dispara en el contenedor (con `bubbles: true`) si la acción
+  lanza o su promesa se rechaza — `e.detail` trae `{ name, error }`. Sin este evento, un
+  error en una acción quedaba solo en la consola.
 
 ## Acciones por fila: `ctx.item`
 
@@ -262,6 +374,23 @@ get actions() {
   mientras corre el request. Ojo: no toca el array del store, así que el próximo cambio
   del array lo sobrescribe. Para que persista, reasigna el array.
 
+**La fila ve las claves del padre** (pero gana la fila): una directiva dentro de un
+`data-for` que enlaza una clave que el ítem no tiene cae al store del componente, así que
+`data-if="esAdmin"` (una clave del componente, no del ítem) funciona dentro de la lista
+sin tener que copiar `esAdmin` en cada fila:
+
+```html
+<template data-for="propiedades" data-key="id">
+  <article>
+    <strong data-bind="titulo"></strong>            <!-- del ítem -->
+    <button data-if="esAdmin" data-action="borrar">Borrar</button>  <!-- del componente -->
+  </article>
+</template>
+```
+
+Si el ítem SÍ tiene esa clave (`{ id, titulo, moneda: 'VES' }` con el componente en
+`moneda: 'USD'`), gana la del ítem. `renderers/homly.php` sigue la misma regla.
+
 ## Filtros en la URL: `Homly.bindQuery`
 
 Un listado filtrado que no se puede pasar por WhatsApp no sirve. `bindQuery` espeja las
@@ -292,10 +421,15 @@ actualiza la URL sola.
 - **Los tipos se conservan.** La URL solo tiene strings, así que `bindQuery` castea según
   el valor inicial de cada clave: `pagina: 1` vuelve como número, `conFoto: false` como
   booleano. Sin eso, `pagina + 1` te daría `'21'`.
+- **Una clave cuyo valor inicial es un array es un param repetido**: `tipo: []` lee
+  `?tipo=casa&tipo=apto` como `['casa', 'apto']` (`getAll`) y lo escribe de vuelta con
+  `append` — un `[]` deja la URL limpia, igual que cualquier otro valor en su default.
 - **Una clave en su default no ensucia la URL.** Un listado sin tocar queda en
   `/propiedades`, no en `/propiedades?q=&orden=fecha&pagina=1`.
 - **Usa `replaceState`**, así tipear en un filtro no apila una entrada de historial por
   tecla. Irte a otra ruta y volver con el botón atrás sí restaura los filtros.
+- **Varias claves cambiadas en el mismo tick escriben la URL una sola vez** (microtask),
+  no un `replaceState` por cada asignación.
 - **Una clave que desaparece de la URL vuelve a su default**, en vez de quedar pegada.
 - **Se limpia sola** con el `signal` del componente.
 
@@ -306,14 +440,25 @@ onMount() {
   Homly.head({
     title: `${this.getAttribute('slug')} — homly`,
     description: 'Un post del blog',
+    canonical: `https://homly.dev/blog/${this.getAttribute('slug')}`,
     'og:image': '/img/portada.png',
+    'article:author': 'Ana',
+    jsonld: { '@context': 'https://schema.org', '@type': 'BlogPosting', headline: 'Un post del blog' },
   });
 }
 ```
 
 Crea cada tag la primera vez y lo actualiza después, así llamarlo en cada navegación no
-duplica nada. Un valor vacío borra el tag. Las claves `og:*` se escriben como `property`;
-el resto, como `name`.
+duplica nada. Un valor vacío (o `null`) borra el tag.
+
+- `title` — `document.title`, como siempre.
+- `canonical` — un `<link rel="canonical">` (no un `<meta>`).
+- `jsonld` — un objeto, serializado en un `<script type="application/ld+json"
+  data-homly-head="jsonld">`.
+- `og:*`, `article:*`, `product:*`, `profile:*` y `fb:*` se escriben como `property`
+  (lo que Open Graph espera); el resto, como `name`.
+- Una clave con comillas u otros caracteres raros no rompe el `<head>`: el selector que
+  busca el tag existente pasa por `CSS.escape`.
 
 > ⚠️ **Esto no es SEO.** Los scrapers de WhatsApp, Twitter y Slack **no ejecutan
 > JavaScript**: un `og:image` escrito aquí, después de hidratar, no existe para ellos. Para
@@ -379,18 +524,48 @@ onMount() {
 
 No hay (ni hace falta) un `onUpdate`: **los valores los hace `computed`, la vista los bindings, y el efecto imperativo —el caso raro— es una línea de `subscribe`.**
 
+## Estilos y CSP
+
+El CSS de `styleUrl`/`styles` se envuelve en `@scope (tag)`, así no se filtra fuera del
+componente — pero, a partir de 1.10, **una sola hoja por clase de componente**, no una
+por instancia: la primera tarjeta de una grilla de 100 instala la hoja (vía
+`document.adoptedStyleSheets`); las otras 99 la reutilizan.
+
+```js
+class PropertyCard extends HomlyComponent {
+  get styles() { return '.precio { font-weight: 600; }'; }
+}
+```
+
+- **CSP estricta, sin `'unsafe-inline'`.** `adoptedStyleSheets` no es un recurso de
+  estilo "inline" para la CSP: una página servida con `style-src 'self'` (sin nonce ni
+  hash) queda con 0 violaciones. `Homly.styleNonce = '…'` es para el caso donde el
+  navegador no soporta hojas construibles y hace falta el `<style>` de respaldo.
+- **`[data-if][hidden] { display: none !important }`** se instala una sola vez, para que
+  el CSS propio de un componente (con más especificidad dentro de su `@scope`) nunca
+  pueda dejar visible algo que `data-if` ocultó.
+- **`Homly.styleMode = 'inline'`** vuelve al `<style data-homly-scope>` por instancia de
+  antes de 1.10 (una hoja por tarjeta, no compartida) — úsalo solo si algo depende del
+  orden exacto de cascada de esa versión. Se retira en 2.0.
+- **`renderError`** ya no escribe un `style=` inline: el placeholder usa una regla de la
+  hoja compartida, y su texto sale de `Homly.messages.loadError` (reasignable).
+
 ## Detalles
 
 - Si un componente ya trae contenido en el HTML, se hidrata sin volver a pedir la
   plantilla. Sirve para dejar inline el contenido above-the-fold.
-- El CSS de `styleUrl` se envuelve en `@scope`, así no se filtra fuera del componente.
+- **Reconciliación de `data-for` con LIS + `moveBefore`:** cambiar el orden de una lista
+  mueve solo lo estrictamente necesario (dos elementos que cambian de lugar en una lista
+  de 1.000 son dos movimientos, no 997) y usa `Element.moveBefore` cuando el navegador lo
+  soporta, así un Custom Element movido no se desmonta ni se vuelve a hidratar. Las filas
+  que se van se quitan antes de mover las que quedan.
 - **Cache + request collapsing:** las plantillas/CSS se cachean por URL (volver a un
   módulo no re-descarga), y si varios componentes piden el mismo archivo a la vez se
   lanza un solo `fetch` compartido.
 - **Error boundary:** si la hidratación falla (p. ej. la plantilla no carga), el
-  componente muestra un placeholder en vez de romper el DOM. Sobrescribí `renderError(err)`
+  componente muestra un placeholder en vez de romper el DOM. Sobrescribe `renderError(err)`
   para personalizar el mensaje.
-- Las **computed signals** convierten el estado en un grafo reactivo: derivás un
+- Las **computed signals** convierten el estado en un grafo reactivo: derivas un
   valor de otras señales y se mantiene solo, sin recalcular a mano.
 
 ## Depuración (`HOM_DEBUG`)
@@ -407,6 +582,10 @@ Dos niveles:
 
 - **`true`** (básico) — ciclo de vida e hidratación (`⬆ <tag> hydrated in Xms`), cache de plantillas (`fetch`/`cache HIT`/`collapse`), router (`⚡ route …`, `keep-alive HIT/MISS`, `activate`/`deactivate`) y *warnings* de errores comunes (store sin memoizar, `data-for` sin su array).
 - **`'verbose'`** — todo lo anterior **más** cada cambio de señal (`✎ signal precio: 199 → 249`) y cada recompute de computed (`↳ computed precioVes recompute: …`).
+
+Cada *warning* trae un código estable entre corchetes, `[homly Hxxx]`, para buscarlo sin
+depender del texto exacto (que puede cambiar de una versión a otra): `errors.json`, en la
+raíz del repo, tiene la lista completa con una línea de descripción por código.
 
 ## Patrón: panel / SPA con módulos lazy
 
@@ -454,16 +633,22 @@ Para un panel de administración (o cualquier SPA con muchas secciones) el patr�
 ## Tests
 
 ```bash
-npm test
+npm test           # lógica pura, Node, sin navegador
+npm run test:browser   # ciclo de vida, DOM, eventos confiables (usa Chrome + puppeteer-core, solo de desarrollo)
+npm run test:php       # renderers/homly.php + el kit de conformidad (necesita PHP 8.4)
+npm run size            # tamaño real, minificado y gzip -9 (esbuild vía npx, solo de desarrollo)
 ```
 
-102 checks con el `assert` de Node: sin dependencias, sin build, sin CI. Cubren lo que
-falla en silencio —el matcheo de rutas, las carreras de respuestas de `resource`, el
-casteo de tipos de `bindQuery`— y no mucho más.
+`npm test` corre con el `assert` de Node: sin dependencias de runtime, sin build. Cubre
+lo que falla en silencio —el matcheo de rutas, las carreras de respuestas de `resource`,
+el casteo de tipos de `bindQuery`— y no mucho más. El número de checks lo imprime cada
+corrida; no se escribe a mano aquí para no quedar desactualizado.
 
-Lo que necesita DOM real se autoverifica al abrir `tests/index.html` con cualquier
-servidor estático. En las [guías de contribución](CONTRIBUTING.md) está el detalle de
-qué protege cada archivo y qué merece un test.
+Lo que necesita DOM real (ciclo de vida de Custom Elements, `<template>`/`data-for`,
+historial, eventos confiables) vive en `tests/dom/*.html` y corre con
+`npm run test:browser`, o se abre a mano desde `tests/index.html`. En las
+[guías de contribución](CONTRIBUTING.md) está el detalle de qué protege cada archivo y
+qué merece un test.
 
 ## 🤝 Contribuir
 

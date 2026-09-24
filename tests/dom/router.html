@@ -1,0 +1,240 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — router (#3 navigate/homly:navigate, #4 nav token, #5 normalización, #6 retry, #7 defaultPrevented, #8 adopt)</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="app-router"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent, HomlyRouter } from '../../homly.js';
+  import { runChecks, tick, real } from './_harness.js';
+
+  window.__homly_results = runChecks('router', async (check, tick) => {
+    const outlet = document.getElementById('app-router');
+
+    // ============================================================================
+    // FIX ROUTER-9/ROUTER-19: el constructor valida que el root exista.
+    // ============================================================================
+    {
+      let threw = false;
+      try { new HomlyRouter('no-existe-esto'); } catch (e) { threw = /no existe/.test(e.message); }
+      check('el constructor lanza si el id del root no existe en el DOM', threw);
+    }
+
+    const router = new HomlyRouter('app-router', { keepAlive: true });
+
+    class RPage extends HomlyComponent {
+      get template() { return () => '<p class="r-page"></p>'; }
+    }
+    customElements.define('r-page', RPage);
+    router.add('/r-home', 'r-page');
+    router.add('/r-target', 'r-page');
+    router.add('/r-otro-directorio/:slug', 'r-page');
+    router.add('/404', 'r-page');
+    router.start();
+    await tick();
+
+    // ============================================================================
+    // FIX ROUTER-2/CORE-7 (#3): navigate() resuelve `to` como una URL real —
+    // relativo, absoluto o solo un hash — no como un string pegado a mano.
+    // ============================================================================
+    {
+      history.pushState({}, '', '/r-home');
+      await router.navigate('r-target');   // relativo: se resuelve contra location.href
+      await tick();
+      check('navigate() resuelve un path relativo igual que lo haría un <a href>',
+        location.pathname === '/r-target');
+
+      await router.navigate('/r-home#seccion');
+      await tick();
+      check('navigate() conserva el hash', location.pathname === '/r-home' && location.hash === '#seccion');
+    }
+
+    // ============================================================================
+    // FIX ROUTER-2 (#3): la MISMA URL exacta usa replaceState (no apila historial).
+    // ============================================================================
+    {
+      history.pushState({}, '', '/r-mismo-a');
+      const before = history.length;
+      await router.navigate('/r-mismo-b');
+      const afterFirst = history.length;
+      await router.navigate('/r-mismo-b');   // exactamente la misma URL que ya está puesta
+      const afterSecond = history.length;
+
+      check('navegar a una URL nueva sí agrega una entrada de historial', afterFirst === before + 1);
+      check('repetir la URL actual usa replaceState: no agrega otra entrada', afterSecond === afterFirst);
+    }
+
+    // ============================================================================
+    // FIX ROUTER-2 (#3): homly:navigate — bindQuery se entera de un navigate()
+    // programático, no solo de un popstate (atrás/adelante).
+    // ============================================================================
+    {
+      await router.navigate('/r-home');
+      await tick();
+      const qstore = Homly.createStore({ pagina: 1 });
+      Homly.bindQuery(qstore, ['pagina']);
+
+      await router.navigate('/r-home?pagina=5');
+      await tick();
+      check('bindQuery se actualiza en un navigate() programático, vía homly:navigate',
+        qstore.state.pagina === 5);
+    }
+
+    // ============================================================================
+    // FIX ROUTER-2 (#3): el click de un <a data-router-link> usa link.href (resuelto
+    // por el navegador, respeta <base>) y no el atributo crudo.
+    // ============================================================================
+    {
+      const base = document.createElement('base');
+      base.href = location.origin + '/r-otro-directorio/';
+      document.head.appendChild(base);
+
+      const link = document.createElement('a');
+      link.id = 'r-link-base';
+      link.textContent = 'ir';
+      link.setAttribute('data-router-link', '');
+      link.setAttribute('href', 'x');   // relativo: con <base>, resuelve a /r-otro-directorio/x
+      document.body.appendChild(link);
+
+      await real.click('#r-link-base');
+      await tick();
+
+      check('el click usa link.href (respeta <base>), no getAttribute("href") a pelo',
+        location.pathname === '/r-otro-directorio/x');
+
+      link.remove();
+      document.head.removeChild(base);
+    }
+
+    // ============================================================================
+    // FIX ROUTER-7a (#7): el router respeta e.defaultPrevented de un listener propio.
+    // ============================================================================
+    {
+      const link = document.createElement('a');
+      link.id = 'r-link-guarded';
+      link.textContent = 'ir';
+      link.href = '/r-nunca-deberia-navegar-aca';
+      link.setAttribute('data-router-link', '');
+      link.addEventListener('click', (e) => e.preventDefault());   // corre ANTES: está en el propio target
+      document.body.appendChild(link);
+
+      const before = location.pathname;
+      await real.click('#r-link-guarded');
+      await tick();
+      check('un preventDefault() propio evita que el router navegue', location.pathname === before);
+
+      link.remove();
+    }
+
+    // ============================================================================
+    // FIX ROUTER-3 (#4): token de navegación — A lenta y B rápida, gana B.
+    // ============================================================================
+    {
+      const div = document.createElement('div');
+      div.id = 'app-router2';
+      document.body.appendChild(div);
+
+      let resolveA;
+      const router2 = new HomlyRouter('app-router2', { keepAlive: false });
+      class TokenA extends HomlyComponent { get template() { return () => '<p>a</p>'; } }
+      class TokenB extends HomlyComponent { get template() { return () => '<p>b</p>'; } }
+      customElements.define('token-a-page', TokenA);
+      customElements.define('token-b-page', TokenB);
+      router2.add('/token-a', 'token-a-page', () => new Promise((res) => { resolveA = res; }));
+      router2.add('/token-b', 'token-b-page', () => Promise.resolve());
+
+      const p1 = router2.navigate('/token-a');   // se queda esperando su loader
+      await tick();
+      const p2 = router2.navigate('/token-b');   // gana la carrera: no tiene que esperar nada
+      await p2;
+      resolveA();     // la navegación vieja recién ahora "termina" de cargar
+      await p1;
+      await tick();
+
+      check('la navegación vieja no pisa a la que ganó la carrera',
+        div.firstElementChild.localName === 'token-b-page');
+
+      div.remove();
+    }
+
+    // ============================================================================
+    // FIX ROUTER-16 (#8): la adopción de un prerender compara el VALOR de los params,
+    // no solo el tag — sin eso, una carrera podía adoptar el nodo de otra ruta.
+    // ============================================================================
+    {
+      const div = document.createElement('div');
+      div.id = 'app-adopt';
+      document.body.appendChild(div);
+      div.innerHTML = '<param-page id="a"></param-page>';
+      customElements.define('param-page', class extends HomlyComponent {
+        // Smart hydration ya salta esto si el elemento llega con contenido (el caso
+        // adoptado): solo se usa cuando hace falta crear uno de cero.
+        get template() { return () => '<p></p>'; }
+      });
+      await tick();   // deja que el elemento ya presente en el DOM termine de upgradearse
+
+      const r3 = new HomlyRouter('app-adopt');
+      let resolveSlow;
+      r3.add('/p/:id', 'param-page', () => new Promise((res) => { resolveSlow = res; }));
+      r3.add('/q/:id', 'param-page', null);   // sin loader: no espera nada
+
+      const slow = r3.handleRoute('/p/a');     // arranca, se queda esperando el loader
+      await tick();
+      const fast = r3.handleRoute('/q/b');     // gana la carrera del "primer hydrate"
+      await fast;
+      resolveSlow();
+      await slow;
+      await tick();
+
+      const adopted = div.querySelector('param-page');
+      check('no adopta el prerender de otra ruta con distinto :id — se recrea con el correcto',
+        adopted && adopted.getAttribute('id') === 'b');
+
+      div.remove();
+    }
+
+    // ============================================================================
+    // FIX ROUTER-9/ROUTER-19 (#6): un loader que falla no deja la ruta atascada — el
+    // mismo link puede reintentar.
+    // ============================================================================
+    {
+      const div = document.createElement('div');
+      div.id = 'app-router4';
+      document.body.appendChild(div);
+
+      let attempts = 0;
+      const router4 = new HomlyRouter('app-router4', { keepAlive: false });
+      class RetryPage extends HomlyComponent { get template() { return () => '<p>ok</p>'; } }
+      customElements.define('retry-page', RetryPage);
+      router4.add('/retry-me', 'retry-page', () => {
+        attempts++;
+        return attempts === 1 ? Promise.reject(new Error('chunk falló a propósito (test)')) : Promise.resolve();
+      });
+
+      const originalError = console.error;
+      console.error = () => {};   // se espera este error; no hace falta verlo en la salida
+      await router4.navigate('/retry-me');
+      await tick();
+      console.error = originalError;
+
+      check('un loader que falla limpia _lastPath (no queda pegado)', router4._lastPath === null);
+
+      await router4.navigate('/retry-me');   // el "mismo link", reintentado
+      await tick();
+      check('reintentar la misma ruta sí carga (el loader corrió de nuevo)', attempts === 2);
+      check('y esta vez renderiza', div.querySelector('retry-page') !== null);
+
+      div.remove();
+    }
+
+    // ============================================================================
+    // FIX ROUTER-4/ROUTER-12 (#5): barra final y /index.html normalizados también
+    // al navegar (no solo al resolver internamente): el prerender de una no se pisa.
+    // ============================================================================
+    {
+      await router.navigate('/r-home/');
+      await tick();
+      check("'/r-home/' resuelve la misma ruta que '/r-home'", outlet.querySelector('.r-page') !== null);
+    }
+  });
+</script>

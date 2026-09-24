@@ -1,0 +1,173 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — data-for: listas anidadas, campos que desaparecen, claves raras</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  window.__homly_results = runChecks('list', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // --- FIX CORE-4: data-for anidado dentro de una fila usa el store DE LA FILA ------
+    {
+      class CasasDemo extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            casas: [
+              { id: 1, nombre: 'Casa A', amenidades: [{ id: 'p' }, { id: 'g' }] },
+              { id: 2, nombre: 'Casa B', amenidades: [{ id: 'w' }] },
+            ],
+          }));
+        }
+        get template() {
+          return () => `
+            <template data-for="casas" data-key="id">
+              <article class="casa">
+                <span data-bind="nombre"></span>
+                <ul>
+                  <template data-for="amenidades" data-key="id">
+                    <li data-bind="id"></li>
+                  </template>
+                </ul>
+              </article>
+            </template>`;
+        }
+      }
+      customElements.define('casas-demo', CasasDemo);
+      const el = document.createElement('casas-demo');
+      stage.appendChild(el);
+      await tick(30);
+
+      const casas = el.querySelectorAll('.casa');
+      check('renderiza las 2 filas externas', casas.length === 2);
+      check('la 1ª fila tiene sus 2 <li> internos (lista anidada bindeada)',
+        casas[0].querySelectorAll('li').length === 2
+        && [...casas[0].querySelectorAll('li')].map((li) => li.textContent).join(',') === 'p,g');
+      check('la 2ª fila tiene solo su propio <li>, no los de la 1ª',
+        casas[1].querySelectorAll('li').length === 1 && casas[1].querySelector('li').textContent === 'w');
+    }
+
+    // --- FIX CORE-12/PERF-10: un campo que desaparece se vacía, no queda pegado ------
+    {
+      class FotoDemo extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            items: [{ id: 1, precio: 100, foto: 'a.jpg' }],
+          }));
+        }
+        get template() {
+          return () => `
+            <template data-for="items" data-key="id">
+              <div class="item"><span class="precio" data-bind="precio"></span><span class="foto" data-bind="foto"></span></div>
+            </template>`;
+        }
+      }
+      customElements.define('foto-demo', FotoDemo);
+      const el = document.createElement('foto-demo');
+      stage.appendChild(el);
+      await tick(30);
+
+      check('arranca con precio y foto', el.querySelector('.precio').textContent === '100'
+        && el.querySelector('.foto').textContent === 'a.jpg');
+
+      el._store.state.items = [{ id: 1, precio: 120 }];   // "foto" desapareció del ítem
+      await tick(30);
+      check('el precio se actualiza', el.querySelector('.precio').textContent === '120');
+      check('la foto que desapareció se vacía (no queda "a.jpg")', el.querySelector('.foto').textContent === '');
+    }
+
+    // --- FIX CORE-19a/LIST-1: un item null no rompe el render -------------------------
+    {
+      class NuloListaDemo extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            items: [{ id: 1, n: 'uno' }, null, { id: 2, n: 'dos' }],
+          }));
+        }
+        get template() {
+          return () => '<template data-for="items" data-key="id"><span class="row" data-bind="n"></span></template>';
+        }
+      }
+      customElements.define('nulolista-demo', NuloListaDemo);
+      let threw = false;
+      const el = document.createElement('nulolista-demo');
+      try {
+        stage.appendChild(el);
+        await tick(30);
+      } catch { threw = true; }
+      check('un item null en el array no lanza y no aborta el render', !threw);
+      check('los items válidos alrededor del null igual se renderizan',
+        [...el.querySelectorAll('.row')].map((s) => s.textContent).sort().join(',') === 'dos,uno');
+    }
+
+    // --- FIX CORE-19a/LIST-1: claves duplicadas colapsan a una sola fila -------------
+    {
+      class DupDemo extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            items: [{ id: 'x', n: '1' }, { id: 'x', n: '2' }, { id: 'x', n: '3' }],
+          }));
+        }
+        get template() {
+          return () => '<template data-for="items" data-key="id"><span class="row" data-bind="n"></span></template>';
+        }
+      }
+      customElements.define('dup-demo', DupDemo);
+      const el = document.createElement('dup-demo');
+      stage.appendChild(el);
+      await tick(30);
+      check('3 items con la misma key renderizan una sola fila', el.querySelectorAll('.row').length === 1);
+    }
+
+    // --- FIX CORE-13b/P5: la fila ve las claves del padre (gana la fila) -------------
+    {
+      class FilaVePadre extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            esAdmin: true,
+            moneda: 'USD',
+            items: [
+              { id: 1, nombre: 'Casa A' },                         // sin "moneda" propia: cae al padre
+              { id: 2, nombre: 'Casa B', moneda: 'VES' },          // con "moneda" propia: gana la fila
+            ],
+          }));
+        }
+        get template() {
+          return () => `
+            <template data-for="items" data-key="id">
+              <article class="fila">
+                <span class="nombre" data-bind="nombre"></span>
+                <span class="moneda" data-bind="moneda"></span>
+                <button class="borrar" data-if="esAdmin">borrar</button>
+              </article>
+            </template>`;
+        }
+      }
+      customElements.define('fila-ve-padre', FilaVePadre);
+      const el = document.createElement('fila-ve-padre');
+      stage.appendChild(el);
+      await tick(30);
+
+      const filas = el.querySelectorAll('.fila');
+      check('data-if="esAdmin" (clave del COMPONENTE, no del item) se enlaza dentro de la fila',
+        !filas[0].querySelector('.borrar').hasAttribute('hidden'));
+      check('una fila sin "moneda" propia cae al valor del padre', filas[0].querySelector('.moneda').textContent === 'USD');
+      check('...pero una fila CON su propia "moneda" gana (no la pisa el padre)',
+        filas[1].querySelector('.moneda').textContent === 'VES');
+
+      el._store.state.esAdmin = false;
+      await tick(20);
+      check('el fallback sigue siendo reactivo: esAdmin=false oculta el botón en AMBAS filas',
+        filas[0].querySelector('.borrar').hasAttribute('hidden') && filas[1].querySelector('.borrar').hasAttribute('hidden'));
+
+      el._store.state.moneda = 'EUR';
+      await tick(20);
+      check('cambiar "moneda" en el padre actualiza la fila que no tiene la suya propia',
+        filas[0].querySelector('.moneda').textContent === 'EUR');
+      check('...y no toca la fila que SÍ tiene su propio valor', filas[1].querySelector('.moneda').textContent === 'VES');
+    }
+  });
+</script>

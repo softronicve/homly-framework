@@ -4,6 +4,11 @@
  * numérico se convierte en `'2'`), una clave ausente tiene que volver a su default y no
  * quedarse pegada, y `subscribe` es eager (escribiría la URL al registrarse).
  *
+ * FIX PERF-5: `store → URL` (`write()`) se coalesce en un microtask, así que un cambio
+ * de señal ya no actualiza `location.search` en el mismo tick — de ahí los `await
+ * tick()` después de cada `store.state.x = …` de este archivo (antes de esta versión,
+ * la escritura era sincrónica).
+ *
  * Corre sin dependencias ni build:  node tests/query.test.js
  *
  * bindQuery toca location/history pero no el DOM, así que alcanza con stubearlos.
@@ -11,6 +16,9 @@
 import assert from 'node:assert/strict';
 
 globalThis.HTMLElement ??= class {};
+
+/** Deja correr los microtasks encolados (el `write()` batcheado de bindQuery). */
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // --- stubs de location / history / listeners ----------------------------------
 const listeners = new Set();
@@ -67,9 +75,11 @@ const { Homly } = await import('../homly.js');
   assert.equal(location.search, '', 'registrarse no ensucia la URL');
 
   store.state.q = 'depto';
+  await tick();
   assert.equal(location.search, '?q=depto');
 
   store.state.orden = 'precio';
+  await tick();
   assert.equal(location.search, '?q=depto&orden=precio');
 }
 
@@ -79,18 +89,24 @@ const { Homly } = await import('../homly.js');
   const store = Homly.createStore({ q: '', orden: 'fecha', conFoto: false });
   Homly.bindQuery(store, ['q', 'orden', 'conFoto']);
 
+  // FIX PERF-5: dos señales cambiadas en el mismo tick ⇒ un solo write() con el
+  // estado final, no dos `replaceState` seguidos.
   store.state.q = 'casa';
   store.state.conFoto = true;
+  await tick();
   assert.equal(location.search, '?q=casa&conFoto=true');
 
   store.state.q = '';
+  await tick();
   assert.equal(location.search, '?conFoto=true', 'vacío ⇒ se borra el param');
 
   store.state.orden = 'precio';
   store.state.orden = 'fecha';
+  await tick();
   assert.equal(location.search, '?conFoto=true', 'volver al default ⇒ se borra');
 
   store.state.conFoto = false;
+  await tick();
   assert.equal(location.search, '', 'la URL limpia queda limpia');
 }
 
@@ -112,7 +128,38 @@ const { Homly } = await import('../homly.js');
   reset('?conFoto=false');
   const store = Homly.createStore({ conFoto: true });
   Homly.bindQuery(store, ['conFoto']);
-  assert.equal(store.state.conFoto, false, "'false' no es truthy acá");
+  assert.equal(store.state.conFoto, false, "'false' no es truthy aquí");
+}
+
+// --- FIX CORE-8a: un número inválido en la URL vuelve al default, no a NaN ---------
+{
+  reset('?pagina=abc');
+  const store = Homly.createStore({ pagina: 1 });
+  const pedidos = [];
+  Homly.bindQuery(store, ['pagina']);
+  store.resource('items', ['pagina'], async (p) => { pedidos.push(p); return [p]; });
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(store.state.pagina, 1, "'abc' no es un número: se queda con el default");
+  assert.equal(location.search, '', 'un valor inválido no ensucia la URL con "pagina=NaN"');
+  assert.deepEqual(pedidos, [1], 'un solo request, no uno por cada NaN !== NaN');
+}
+
+// --- FIX CORE-8a: '0' también cuenta como false, igual que 'false' ----------------
+{
+  reset('?conFoto=0');
+  const store = Homly.createStore({ conFoto: true });
+  Homly.bindQuery(store, ['conFoto']);
+  assert.equal(store.state.conFoto, false, "'0' en la URL es tan false como 'false'");
+}
+
+// --- FIX CORE-8a: '' también vuelve al default, no a Number('') === 0 -------------
+{
+  reset('?precioMax=');
+  const store = Homly.createStore({ precioMax: 500 });
+  Homly.bindQuery(store, ['precioMax']);
+  assert.equal(store.state.precioMax, 500,
+    "un ?precioMax= vacío no es 0 — Number('') === 0 lo volvería un precio real");
 }
 
 // --- el botón atrás restaura los filtros --------------------------------------
@@ -129,6 +176,7 @@ const { Homly } = await import('../homly.js');
   goBackTo('');
   assert.equal(store.state.q, '', 'un filtro que ya no está en la URL vuelve al default');
   assert.equal(store.state.orden, 'fecha');
+  await tick();   // drena el write() que ese cambio encoló, antes del reset() del siguiente bloque
 }
 
 // --- el abort suelta el listener de popstate ----------------------------------
@@ -157,4 +205,24 @@ const { Homly } = await import('../homly.js');
     'el primer fetch ya usa el filtro de la URL: no pide dos veces');
 }
 
-console.log('✓ query: 24 checks OK');
+// --- FIX CORE-8b/QUERY-1: una clave cuyo default es un array usa getAll/append ------
+{
+  reset('?tipo=casa&tipo=apto');
+  const store = Homly.createStore({ tipo: [] });
+  Homly.bindQuery(store, ['tipo']);
+  assert.deepEqual(store.state.tipo, ['casa', 'apto'], '?tipo repetido llega como array');
+
+  store.state.tipo = ['casa'];
+  await tick();
+  assert.equal(location.search, '?tipo=casa', 'un solo valor: un solo par');
+
+  store.state.tipo = ['casa', 'apto', 'quinta'];
+  await tick();
+  assert.equal(location.search, '?tipo=casa&tipo=apto&tipo=quinta', 'varios valores: un par por cada uno');
+
+  store.state.tipo = [];
+  await tick();
+  assert.equal(location.search, '', '[] deja la URL limpia, igual que cualquier otro default');
+}
+
+console.log('✓ query: 33 checks OK');

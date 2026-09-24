@@ -1,0 +1,28 @@
+{
+    "casas": [
+        {
+            "id": 1,
+            "nombre": "Casa A",
+            "amenidades": [
+                {
+                    "id": "p",
+                    "nombre": "Piscina"
+                },
+                {
+                    "id": "g",
+                    "nombre": "Garaje"
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "nombre": "Casa B",
+            "amenidades": [
+                {
+                    "id": "w",
+                    "nombre": "Wifi"
+                }
+            ]
+        }
+    ]
+}

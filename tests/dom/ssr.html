@@ -1,0 +1,273 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — protocolo SSR: adopción, siembra de estado y límite de componente</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick, real } from './_harness.js';
+
+  window.__homly_results = runChecks('ssr', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // ============================================================================
+    // (a)+(b) bindList adopta las filas hermanas data-homly-key sin clonarlas, y sus
+    // directivas quedan atadas al store DE LA FILA (identidad de nodo, 0 mutaciones,
+    // 0 requests, la interacción sigue funcionando).
+    // ============================================================================
+    {
+      let fetchCalls = 0;
+      const originalLoad = Homly.loadTemplate;
+      Homly.loadTemplate = (...args) => { fetchCalls++; return originalLoad(...args); };
+
+      class MhList extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            titulo: 'Casas',
+            items: [
+              { id: 1, nombre: 'Casa A', fav: false },
+              { id: 2, nombre: 'Casa B', fav: true },
+            ],
+          }));
+        }
+        get actions() {
+          return { fav: (_t, { item }) => { item.state.fav = !item.state.fav; } };
+        }
+      }
+      customElements.define('mh-list', MhList);
+
+      const el = document.createElement('mh-list');
+      el.setAttribute('data-homly-ssr', '');
+      // Server-rendered markup: exactamente lo que emitiría renderers/homly.php — el
+      // <template> se conserva, cada fila trae su data-homly-key, ya con sus valores.
+      el.innerHTML = `
+        <h1 data-bind="titulo">Casas</h1>
+        <template data-for="items" data-key="id"><li><span data-bind="nombre"></span></li></template><li data-homly-key="1"><span data-bind="nombre">Casa A</span><button data-action="fav" data-bind-class="activo:fav">♥</button></li><li data-homly-key="2"><span data-bind="nombre">Casa B</span><button data-action="fav" data-bind-class="activo:fav">♥</button></li>`.trim();
+
+      const rowsBefore = [...el.querySelectorAll('[data-homly-key]')];
+      const observer = new MutationObserver(() => {});
+      observer.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+
+      stage.appendChild(el);
+      await tick(40);
+
+      const mutations = observer.takeRecords();
+      check('0 mutaciones en las filas durante la hidratación', mutations.length === 0);
+      check('0 requests a la API (no se llamó loadTemplate)', fetchCalls === 0);
+
+      const rowsAfter = [...el.querySelectorAll('[data-homly-key]')];
+      check('siguen siendo 2 filas', rowsAfter.length === 2);
+      check('son LOS MISMOS nodos (identidad), no clones',
+        rowsAfter.length === rowsBefore.length && rowsAfter.every((n, i) => n === rowsBefore[i]));
+      check('el <template> se conserva en el DOM', el.querySelector('template[data-for]') != null);
+      check('el h1 del host se bindeó (scalar fuera de la lista)', el.querySelector('h1').textContent === 'Casas');
+
+      const btn1 = rowsAfter[0].querySelector('button');
+      check('la fila adoptada arranca sin la clase activa (fav:false)', !btn1.classList.contains('activo'));
+      btn1.click();
+      await tick(20);
+      check('la interacción sigue funcionando: click cambia el store DE LA FILA', btn1.classList.contains('activo'));
+      check('la otra fila no se vio afectada', rowsAfter[1].querySelector('button').classList.contains('activo'));
+
+      Homly.loadTemplate = originalLoad;
+    }
+
+    // ============================================================================
+    // (c) Homly.initial: siembra el store desde <script data-homly-state>, solo en
+    // las claves ya declaradas — una clave extra del JSON se ignora.
+    // ============================================================================
+    {
+      class MhCard extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore(
+            Homly.initial(this, { titulo: 'default', precio: 0 }),
+          ));
+        }
+      }
+      customElements.define('mh-card', MhCard);
+
+      const el = document.createElement('mh-card');
+      el.setAttribute('data-homly-ssr', '');
+      el.innerHTML = '<script type="application/json" data-homly-state>'
+        + JSON.stringify({ titulo: 'Casa sembrada', precio: 95000, intruso: 'no debería entrar' })
+        + '<\/script><h2 data-bind="titulo"></h2><span data-bind="precio"></span>';
+      stage.appendChild(el);
+      await tick(30);
+
+      check('el título se sembró desde el script', el.querySelector('h2').textContent === 'Casa sembrada');
+      check('el precio se sembró desde el script', el.querySelector('span').textContent === '95000');
+      check('una clave no declarada en los defaults no entra al store', el._store.signals.intruso === undefined);
+    }
+
+    // ============================================================================
+    // (d) store.resource(..., { initial }) no dispara el primer fetch si ya hay
+    // valor sembrado (probado también en Node sobre resource.test.js; aquí con DOM).
+    // ============================================================================
+    {
+      let fetched = 0;
+      class MhResource extends HomlyComponent {
+        get store() {
+          if (this._store) return this._store;
+          // El nombre de un resource no se declara en el initialState de createStore
+          // (resource() lo agrega); la siembra se lee del island directamente y se pasa
+          // como opción, tal como haría un componente real.
+          const island = this.querySelector(':scope > script[data-homly-state]');
+          const seed = island ? JSON.parse(island.textContent) : {};
+          const s = Homly.createStore({});
+          const opts = Object.hasOwn(seed, 'propiedades') ? { initial: seed.propiedades } : {};
+          s.resource('propiedades', [], async () => { fetched++; return ['de la red']; }, opts);
+          return (this._store = s);
+        }
+      }
+      customElements.define('mh-resource', MhResource);
+
+      const el = document.createElement('mh-resource');
+      el.innerHTML = '<script type="application/json" data-homly-state>'
+        + JSON.stringify({ propiedades: ['sembrada'] }) + '<\/script>';
+      stage.appendChild(el);
+      await tick(30);
+      check('resource arranca con el valor sembrado', JSON.stringify(el._store.state.propiedades) === JSON.stringify(['sembrada']));
+      check('el fetch real no corrió', fetched === 0);
+    }
+
+    // ============================================================================
+    // (e) data-homly-ssr tiene prioridad sobre la heurística de hidratación: aunque
+    // el host quede sin hijos, no se refetchea el template.
+    // ============================================================================
+    {
+      let fetchCalls = 0;
+      const originalLoad = Homly.loadTemplate;
+      Homly.loadTemplate = (...args) => { fetchCalls++; return originalLoad(...args); };
+
+      class MhVacio extends HomlyComponent {
+        get templateUrl() { return '/no-deberia-pedirse-nunca.html'; }
+      }
+      customElements.define('mh-vacio', MhVacio);
+
+      const el = document.createElement('mh-vacio');
+      el.setAttribute('data-homly-ssr', '');   // sin hijos, pero marcado como ya renderizado
+      stage.appendChild(el);
+      await tick(30);
+
+      check('data-homly-ssr evita el fetch aunque children.length sea 0', fetchCalls === 0);
+      check('no quedó un error de hidratación pintado', el.querySelector('[data-homly-error]') == null);
+      Homly.loadTemplate = originalLoad;
+    }
+
+    // ============================================================================
+    // Límite de componente (bindView): un hijo anidado, ya prerenderizado, no cambia
+    // con el store del padre — cada uno bindea solo lo suyo.
+    // ============================================================================
+    {
+      class HijoComp extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ nombre: 'Hijo' })); }
+      }
+      customElements.define('hijo-comp', HijoComp);
+
+      class PadreComp extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ nombre: 'Padre' })); }
+      }
+      customElements.define('padre-comp', PadreComp);
+
+      const el = document.createElement('padre-comp');
+      el.setAttribute('data-homly-ssr', '');
+      // El hijo ya viene prerenderizado con SU propio <h3 data-bind="nombre">: el caso
+      // que antes fallaba, porque el querySelectorAll del padre lo alcanzaba igual.
+      el.innerHTML = '<span class="parent-name" data-bind="nombre"></span>'
+        + '<hijo-comp data-homly-ssr><h3 class="child-name" data-bind="nombre"></h3></hijo-comp>';
+      stage.appendChild(el);
+      await tick(40);
+
+      check('el nombre del padre se bindeó', el.querySelector('.parent-name').textContent === 'Padre');
+      check('el nombre del hijo se bindeó con SU store', el.querySelector('.child-name').textContent === 'Hijo');
+
+      el._store.state.nombre = 'PadreCambiado';
+      await tick(20);
+      check('cambiar el store del padre actualiza al padre', el.querySelector('.parent-name').textContent === 'PadreCambiado');
+      check('...pero NO al hijo (límite de componente)', el.querySelector('.child-name').textContent === 'Hijo');
+    }
+
+    // ============================================================================
+    // Límite de componente (bindList): un <template data-for> dentro de un hijo
+    // anidado no lo procesa el bindList del padre, ni siquiera con la misma clave.
+    // ============================================================================
+    {
+      class HijoLista extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({ items: [{ id: 'h1', n: 'del hijo' }] }));
+        }
+      }
+      customElements.define('hijo-lista', HijoLista);
+
+      class PadreLista extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({ items: [{ id: 'p1', n: 'del padre' }, { id: 'p2', n: 'del padre 2' }] }));
+        }
+      }
+      customElements.define('padre-lista', PadreLista);
+
+      const el = document.createElement('padre-lista');
+      el.setAttribute('data-homly-ssr', '');
+      el.innerHTML = '<template data-for="items" data-key="id"><li class="p-row" data-bind="n"></li></template>'
+        + '<li class="p-row" data-bind="n" data-homly-key="p1">del padre</li>'
+        + '<li class="p-row" data-bind="n" data-homly-key="p2">del padre 2</li>'
+        + '<hijo-lista data-homly-ssr>'
+        + '<template data-for="items" data-key="id"><li class="h-row" data-bind="n"></li></template>'
+        + '<li class="h-row" data-bind="n" data-homly-key="h1">del hijo</li>'
+        + '</hijo-lista>';
+      stage.appendChild(el);
+      await tick(40);
+
+      check('el padre renderiza sus 2 filas', el.querySelectorAll('.p-row').length === 2);
+      check('el hijo renderiza su propia fila, con SU store', el.querySelectorAll('.h-row').length === 1
+        && el.querySelector('.h-row').textContent === 'del hijo');
+
+      el._store.state.items = [...el._store.state.items, { id: 'p3', n: 'del padre 3' }];
+      await tick(20);
+      check('agregar un ítem al padre no toca la lista del hijo', el.querySelectorAll('.h-row').length === 1);
+      check('...y sí crece la del padre', el.querySelectorAll('.p-row').length === 3);
+    }
+
+    // ============================================================================
+    // Varios pares en data-bind-attr / data-bind-class: "src:foto, alt:titulo".
+    // ============================================================================
+    {
+      class MhFoto extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({
+            foto: '/img/casa.webp', titulo: 'Casa linda', url: '/casa/1', etiqueta: 'ver casa',
+            activa: true, destacada: false,
+          }));
+        }
+        get template() {
+          return () => '<img data-bind-attr="src:foto, alt:titulo">'
+            + '<a data-bind-attr="href:url, aria-label:etiqueta">ver</a>'
+            + '<div class="card" data-bind-class="activo:activa, destacado:destacada"></div>';
+        }
+      }
+      customElements.define('mh-foto', MhFoto);
+      const el = document.createElement('mh-foto');
+      stage.appendChild(el);
+      await tick(30);
+
+      const img = el.querySelector('img');
+      check('data-bind-attr: primer par (src) aplicado', img.getAttribute('src') === '/img/casa.webp');
+      check('data-bind-attr: segundo par (alt) aplicado', img.getAttribute('alt') === 'Casa linda');
+
+      const a = el.querySelector('a');
+      check('data-bind-attr en <a>: href aplicado', a.getAttribute('href') === '/casa/1');
+      check('data-bind-attr en <a>: aria-label aplicado (2º par)', a.getAttribute('aria-label') === 'ver casa');
+
+      const card = el.querySelector('.card');
+      check('data-bind-class: primera clase (activo) aplicada', card.classList.contains('activo'));
+      check('data-bind-class: segunda clase (destacado) NO aplicada (falsy)', !card.classList.contains('destacado'));
+
+      el._store.state.foto = '/img/otra.webp';
+      el._store.state.destacada = true;
+      await tick(20);
+      check('cambiar "foto" no toca "alt" (independencia entre pares)', img.getAttribute('alt') === 'Casa linda' && img.getAttribute('src') === '/img/otra.webp');
+      check('cambiar "destacada" prende su clase sin tocar "activo"', card.classList.contains('destacado') && card.classList.contains('activo'));
+    }
+  });
+</script>
