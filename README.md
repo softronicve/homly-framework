@@ -12,13 +12,13 @@ La idea es simple:
 
 ## Instalación
 
-No hay nada que instalar ni compilar. Podés cargar `homly.js` desde un CDN, fijando la versión por tag:
+No hay nada que instalar ni compilar. Puedes cargar `homly.js` desde un CDN, fijando la versión por tag:
 
 ```js
 import { HomlyComponent, Homly } from 'https://cdn.jsdelivr.net/gh/softronicve/homly-framework@v1.9.0/homly.js';
 ```
 
-O, para no repetir la URL en cada componente, declará un import map en tu `index.html` y usá un specifier corto:
+O, para no repetir la URL en cada componente, declara un import map en tu `index.html` y usa un specifier corto:
 
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -31,7 +31,7 @@ O, para no repetir la URL en cada componente, declará un import map en tu `inde
 import { HomlyComponent, Homly } from 'homly';
 ```
 
-Fijá siempre una versión (`@v1.9.0`); evitá `@latest` o `@main` en producción, porque cambian sin aviso. También podés descargar `homly.js` y servirlo desde tu propio dominio.
+Fija siempre una versión (`@v1.9.0`); evita `@latest` o `@main` en producción, porque cambian sin aviso. También puedes descargar `homly.js` y servirlo desde tu propio dominio.
 
 ## Ejemplo
 
@@ -43,7 +43,7 @@ class Contador extends HomlyComponent {
   get templateUrl() { return './contador.html'; }
   get styleUrl() { return './contador.css'; }
 
-  // Memoizá el store (el ??=) para que la vista y las acciones usen la misma instancia.
+  // Memoiza el store (el ??=) para que la vista y las acciones usen la misma instancia.
   get store() {
     return (this._store ??= Homly.createStore({ n: 0 }));
   }
@@ -77,7 +77,7 @@ customElements.define('mi-contador', Contador);
   store. Requiere `data-key="campo"` (identidad para reusar nodos al cambiar el
   array) y acepta `data-index="i"` (expone el índice 0-based, reactivo). Adentro,
   las directivas normales (`data-bind`, etc.) resuelven contra cada ítem. Para que
-  reaccione, reasigná el array con una referencia nueva: `store.state.items = [...next]`.
+  reaccione, reasigna el array con una referencia nueva: `store.state.items = [...next]`.
   Cada ítem debe tener **un único elemento raíz** en el `<template>`; los hermanos de
   nivel superior se ignoran (con `HOM_DEBUG` el framework avisa si hay más de uno).
   Un `data-action` adentro de la lista recibe su fila en `ctx.item` (ver abajo).
@@ -92,7 +92,7 @@ customElements.define('mi-contador', Contador);
 ```
 
 ```js
-// para que reaccione, reasigná con una referencia nueva (no mutes in-place):
+// para que reaccione, reasigna con una referencia nueva (no mutes in-place):
 store.state.propiedades = [...store.state.propiedades, nuevaPropiedad];
 ```
 
@@ -147,13 +147,13 @@ Reglas de matcheo:
 
 - **La ruta estática gana.** Con `/blog/nuevo` y `/blog/:slug` registradas, `/blog/nuevo`
   resuelve al editor, no a un post con slug `nuevo`. El orden de registro no importa.
-- **La cantidad de segmentos tiene que coincidir.** `/blog/:slug` matchea `/blog/hola`,
-  pero no `/blog` ni `/blog/a/b`. Un segmento vacío (`/blog/`) tampoco matchea.
+- **La cantidad de segmentos tiene que coincidir.** `/blog/:slug` coincide con `/blog/hola`,
+  pero no con `/blog` ni con `/blog/a/b`. Un segmento vacío (`/blog/`) tampoco coincide.
 - **El valor se decodifica**: `/buscar/caf%C3%A9` llega como `café`.
 - **Sin riesgo de inyección**: los params se aplican con `setAttribute`, que nunca
-  interpreta HTML. Igual, para escribirlos en la página usá `data-bind` o `textContent`.
+  interpreta HTML. De todos modos, para escribirlos en la página usa `data-bind` o `textContent`.
 - **Los params van en minúscula.** HTML baja los nombres de atributo, así que
-  `/u/:userId` se lee con `getAttribute('userid')`. Usá kebab-case (`:user-id`); con
+  `/u/:userId` se lee con `getAttribute('userid')`. Usa kebab-case (`:user-id`); con
   `HOM_DEBUG` el framework avisa al registrar la ruta.
 - **Con keep-alive, cada path es su propia entrada**: `/blog/a` y `/blog/b` conservan
   su DOM y su estado por separado.
@@ -162,8 +162,8 @@ Reglas de matcheo:
   ya corrió. Con `HOM_DEBUG` el framework avisa si falta alguno.
 
 El componente se monta de nuevo en cada navegación, así que `onMount` vuelve a leer el
-atributo. Si querés que una ruta cambie de param **sin** remontar (keep-alive de
-`/blog/a` a `/blog/b`), usá `observedAttributes` + `attributeChangedCallback`, que ya
+atributo. Si necesitas que una ruta cambie de parámetro **sin** volver a montarse (keep-alive de
+`/blog/a` a `/blog/b`), usa `observedAttributes` + `attributeChangedCallback`, que ya
 son parte de la plataforma.
 
 ## Datos desde una API: `store.resource`
@@ -205,10 +205,10 @@ get store() {
 Qué hace por vos:
 
 - **Se re-dispara solo** cuando cambia cualquiera de sus deps. Con `[]` carga una vez.
-- **Ninguna respuesta vieja pisa a una nueva.** Cada corrida aborta la anterior y lleva
+- **Ninguna respuesta vieja sobrescribe a una nueva.** Cada ejecución aborta la anterior y lleva
   un token; si la primera request tarda más que la segunda, se descarta. Es el bug que
   aparece una de cada veinte búsquedas y que no se ve leyendo el código.
-- **El fetcher recibe un `{ signal }`** al final: pasáselo a `fetch` y el navegador
+- **El fetcher recibe un `{ signal }`** al final: pásalo a `fetch` y el navegador
   cancela de verdad la request abortada.
 - **En error conserva el último valor bueno.** Un refresh que falla no te blanquea la
   lista que ya está en pantalla; `nombreError` te dice qué pasó.
@@ -216,10 +216,10 @@ Qué hace por vos:
   primera carga nunca se retrasa.
 - **Devuelve `{ refresh }`** para un botón de reintentar.
 
-`fetch` no tira error con un 404 o un 500, así que **chequeá `response.ok` y lanzá vos**
-si querés que llegue a `nombreError`.
+`fetch` no lanza error con un 404 o un 500, así que **verifica `response.ok` y lanza tú**
+si quieres que llegue a `nombreError`.
 
-Para filtrar del lado del cliente sin volver a pegarle a la API, poné una `computed`
+Para filtrar del lado del cliente sin volver a llamar a la API, coloca una `computed`
 encima del resource:
 
 ```js
@@ -260,7 +260,7 @@ get actions() {
   queda como siempre (`{ signal, host }`).
 - Escribir en `item.state` actualiza **solo esa fila**, útil para un cambio optimista
   mientras corre el request. Ojo: no toca el array del store, así que el próximo cambio
-  del array lo pisa. Para que persista, reasigná el array.
+  del array lo sobrescribe. Para que persista, reasigna el array.
 
 ## Filtros en la URL: `Homly.bindQuery`
 
@@ -316,7 +316,7 @@ duplica nada. Un valor vacío borra el tag. Las claves `og:*` se escriben como `
 el resto, como `name`.
 
 > ⚠️ **Esto no es SEO.** Los scrapers de WhatsApp, Twitter y Slack **no ejecutan
-> JavaScript**: un `og:image` puesto acá, después de hidratar, no existe para ellos. Para
+> JavaScript**: un `og:image` escrito aquí, después de hidratar, no existe para ellos. Para
 > que un link se previsualice bien y para que Google indexe, los tags tienen que venir en
 > el HTML que sirve el servidor — que es justo lo que el router sabe adoptar (ver
 > *prerender*). Lo que `head` sí arregla es que la pestaña y el historial digan lo
@@ -347,7 +347,7 @@ hasta él— dispara el `import()` de esa ruta, así al hacer click el chunk ya 
 ruta se baja una sola vez, y un prefetch que falla se ignora (al navegar de verdad se
 reintenta).
 
-También lo podés llamar a mano para una ruta que sabés que sigue:
+También puedes llamarlo a mano para una ruta que sabes que viene después:
 
 ```js
 router.prefetch('/checkout');
@@ -357,9 +357,9 @@ router.prefetch('/checkout');
 
 La pregunta que decide la herramienta: **¿el cálculo vuelve al sistema reactivo/DOM, o sale hacia afuera?**
 
-- **Derivar un valor** (que vas a mostrar) → `computed` + `data-bind`. Ej.: `precioVes = precio × rate`.
+- **Derivar un valor** (que vas a mostrar en pantalla) → `computed` + `data-bind`. Ej.: `precioVes = precio × rate`.
 - **Reflejarlo en la vista** → directivas declarativas (`data-bind`, `data-if`, `data-bind-class`, `data-for`…).
-- **Correr un efecto** hacia algo que NO es homly (una librería externa, una API del browser, la red, `localStorage`) → suscribite a la señal con `this.signal` (auto-cleanup):
+- **Correr un efecto** hacia algo que NO es homly (una librería externa, una API del browser, la red, `localStorage`) → suscríbete a la señal con `this.signal` (limpieza automática):
 
 ```js
 onMount() {
@@ -398,7 +398,7 @@ No hay (ni hace falta) un `onUpdate`: **los valores los hace `computed`, la vist
 homly.js trae un logger de desarrollo opt-in (apagado por defecto, **sin costo en producción**). Se prende de tres formas, según el caso:
 
 - **En vivo, desde DevTools:** `window.HOM_DEBUG = true` (o `'verbose'`). Toggle inmediato, sin dejar rastro.
-- **Por link (QA/cliente):** agregá `?homly-debug` o `?homly-debug=verbose` a la URL. Atrapa la hidratación desde el primer milisegundo.
+- **Por enlace (QA/cliente):** agrega `?homly-debug` o `?homly-debug=verbose` a la URL. Atrapa la hidratación desde el primer milisegundo.
 - **Persistente entre recargas:** `localStorage.HOM_DEBUG = 'verbose'` en la consola; sobrevive a los F5.
 
 Precedencia: lo seteado en `window` gana sobre el query param, y este sobre `localStorage`.
@@ -435,7 +435,7 @@ Para un panel de administración (o cualquier SPA con muchas secciones) el patr�
   </a>
   ```
 
-- **Guard de auth** — envolvé `handleRoute` para redirigir según la sesión:
+- **Guard de auth** — envuelve `handleRoute` para redirigir según la sesión:
 
   ```js
   const base = router.handleRoute.bind(router);
@@ -445,7 +445,7 @@ Para un panel de administración (o cualquier SPA con muchas secciones) el patr�
   };
   ```
 
-- **Volver a un módulo no re-descarga nada** — el `import()` lo cachea el navegador y las plantillas/CSS quedan en el cache interno de `loadTemplate`. Al regresar, el módulo se vuelve a renderizar desde cache, sin red. Para que además los **datos** persistan entre navegaciones, guardalos en un store global (no en estado local del componente). Y si querés preservar el **DOM/scroll exacto** (por ejemplo el scroll de un chat o un listado largo), activá keep-alive: `new HomlyRouter('outlet', { keepAlive: true })` — el módulo se oculta en vez de destruirse y vuelve instantáneo, disparando `onActivate`/`onDeactivate`.
+- **Volver a un módulo no re-descarga nada** — el `import()` lo cachea el navegador y las plantillas/CSS quedan en el cache interno de `loadTemplate`. Al regresar, el módulo se vuelve a renderizar desde cache, sin red. Para que además los **datos** persistan entre navegaciones, guárdalos en un store global (no en estado local del componente). Y si quieres preservar el **DOM/scroll exacto** (por ejemplo el scroll de un chat o un listado largo), activa keep-alive: `new HomlyRouter('outlet', { keepAlive: true })` — el módulo se oculta en vez de destruirse y vuelve instantáneo, disparando `onActivate`/`onDeactivate`.
 
 ## Caso de éxito
 
@@ -469,13 +469,13 @@ qué protege cada archivo y qué merece un test.
 
 ¡Las contribuciones son bienvenidas! La rama `main` está protegida: todo cambio entra por Pull Request.
 
-1. Hacé un fork del repositorio.
-2. Creá tu rama de feature (`git checkout -b feature/mi-feature`).
-3. Commiteá tus cambios (`git commit -m 'Agrega mi feature'`).
-4. Pusheá la rama (`git push origin feature/mi-feature`).
-5. Abrí un Pull Request.
+1. Haz un fork del repositorio.
+2. Crea tu rama de feature (`git checkout -b feature/mi-feature`).
+3. Haz commit de tus cambios (`git commit -m 'Agrega mi feature'`).
+4. Sube la rama (`git push origin feature/mi-feature`).
+5. Abre un Pull Request.
 
-Los PR los valida y mergea el creador (o quien tenga permiso de escritura). Antes de empezar, leé las [guías de contribución](CONTRIBUTING.md) para los estándares de código.
+Los PR los valida y mergea el creador (o quien tenga permiso de escritura). Antes de empezar, lee la [guía de contribución](CONTRIBUTING.md) para conocer los estándares de código.
 
 ## Licencia
 
