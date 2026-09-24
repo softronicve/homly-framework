@@ -1,0 +1,13 @@
+{
+  "H104": "data-for: item inválido en el array — null, sin la clave de data-key, o clave duplicada — se ignora y sigue con el resto",
+  "H105": "data-for: la señal que nombra el atributo no existe en el store",
+  "H106": "data-for: el <template> tiene más de un elemento raíz — solo el primero se monta",
+  "H201": "store.state: escritura en una clave que el store no declaró — se ignora",
+  "H202": "store.resource: una dependencia declarada no existe como señal del store",
+  "H301": "store.resource: el fetcher lanzó un error — se publica en <nombre>Error",
+  "H401": "data-bind-attr: el valor no pasó el allowlist de esquemas de URL — no se escribe",
+  "H501": "bindQuery: una de las claves pasadas no existe como señal del store",
+  "H601": "HomlyComponent: el getter store() no está memoizado — devuelve una instancia nueva por acceso",
+  "H701": "HomlyRouter.add: la ruta tiene un :param con mayúsculas — se lee en minúscula",
+  "H702": "HomlyRouter: el HTML prerenderizado no tiene los mismos params que la navegación — se recrea en vez de adoptarlo"
+}

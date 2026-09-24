@@ -1,0 +1,15 @@
+{
+    "items": [
+        {
+            "id": "a1",
+            "nombre": "Con clave"
+        },
+        {
+            "nombre": "Sin clave, se salta"
+        },
+        {
+            "id": "c3",
+            "nombre": "Otra con clave"
+        }
+    ]
+}

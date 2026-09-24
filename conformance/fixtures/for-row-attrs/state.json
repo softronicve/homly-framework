@@ -1,0 +1,14 @@
+{
+    "items": [
+        {
+            "id": "a1",
+            "nombre": "Casa A",
+            "foto": "/img/a1.webp"
+        },
+        {
+            "id": "b2",
+            "nombre": "Casa B",
+            "foto": "/img/b2.webp"
+        }
+    ]
+}

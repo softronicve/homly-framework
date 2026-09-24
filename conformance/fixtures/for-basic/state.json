@@ -1,0 +1,12 @@
+{
+    "items": [
+        {
+            "id": "a1",
+            "nombre": "Casa en El Hatillo"
+        },
+        {
+            "id": "b2",
+            "nombre": "Apto en Altamira"
+        }
+    ]
+}

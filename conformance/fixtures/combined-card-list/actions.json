@@ -1,0 +1,8 @@
+{
+    "selector": "[data-homly-key=\"a1\"] [data-action=\"fav\"]",
+    "action": "fav",
+    "field": "fav",
+    "itemKey": "a1",
+    "before": false,
+    "after": true
+}
