@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — CSP-1: style-src 'self', cero violaciones con el modo compartido</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola. Servida
+  (ver <code>tests/run-browser.mjs</code>) con la cabecera
+  <code>Content-Security-Policy: style-src 'self'</code>.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  window.__homly_results = runChecks('csp', async (check, tick) => {
+    const stage = document.getElementById('stage');
+    const violations = [];
+    document.addEventListener('securitypolicyviolation', (e) => violations.push(e.violatedDirective));
+
+    // ============================================================================
+    // Default (shared): document.adoptedStyleSheets no es un recurso de estilo
+    // "inline" para la CSP — pasa bajo style-src 'self' sin nonce ni hash.
+    // ============================================================================
+    class CspCard extends HomlyComponent {
+      // #txt (especificidad de id) le ganaría a un [hidden] normal si no fuera por
+      // !important en la regla base — lo que hace falta probar de verdad es que esa
+      // regla base también se instaló bajo esta CSP, no solo la del propio componente.
+      get styles() { return '#txt { display: flex; color: rgb(1, 2, 3); }'; }
+      get template() { return () => '<p id="txt" data-if="x" hidden>hola bajo CSP</p>'; }
+    }
+    customElements.define('csp-card', CspCard);
+    const el = document.createElement('csp-card');
+    stage.appendChild(el);
+    await tick(40);
+
+    check('el estilo del propio componente se aplicó de verdad (no es solo "no truena")',
+      getComputedStyle(el.querySelector('#txt')).color === 'rgb(1, 2, 3)');
+    // [data-if][hidden]{display:none!important} (base rule) también pasa por adoptedStyleSheets.
+    check('la regla base [data-if][hidden] gana pese al #txt{display:flex} de más especificidad',
+      getComputedStyle(el.querySelector('#txt')).display === 'none');
+    await tick(20);
+    check('0 violaciones de style-src con el modo compartido (default)', violations.length === 0);
+
+    // ============================================================================
+    // Contraste: el opt-out `styleMode = 'inline'` SÍ es un <style> — bajo esta misma
+    // CSP estricta, el navegador lo bloquea (por eso 'inline' no es el default en 1.10).
+    // ============================================================================
+    Homly.styleMode = 'inline';
+    try {
+      class CspInline extends HomlyComponent {
+        get styles() { return 'p { color: rgb(9, 9, 9); }'; }
+        get template() { return () => '<p id="txt2">inline</p>'; }
+      }
+      customElements.define('csp-inline', CspInline);
+      const el2 = document.createElement('csp-inline');
+      stage.appendChild(el2);
+      await tick(40);
+      check('el opt-out "inline" SÍ dispara una violación bajo esta CSP (por eso no es el default)',
+        violations.some((d) => d.startsWith('style-src')));
+    } finally {
+      Homly.styleMode = null;
+    }
+  });
+</script>

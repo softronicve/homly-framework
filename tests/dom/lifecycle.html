@@ -1,0 +1,202 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — lifecycle (CORE-1/ROUTER-1, CORE-11/ROUTER-6)</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick, real } from './_harness.js';
+
+  window.__homly_results = runChecks('lifecycle', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // ============================================================================
+    // FIX CORE-1/ROUTER-1: mover un componente ya montado no debe re-montarlo, no
+    // debe filtrar suscripciones al store global, y no debe correr onUnmount.
+    // ============================================================================
+    {
+      const shared = Homly.createStore({ mensaje: 'inicial' });
+
+      // Instrumentación: envolver subscribe() para contar cuántas veces el store
+      // global termina notificando en un solo cambio — el síntoma exacto de la fuga
+      // (cada remontaje indebido deja atrás una suscripción muerta, así que un solo
+      // `set()` dispara cada vez más callbacks).
+      let notifyCount = 0;
+      const originalSubscribe = shared.signals.mensaje.subscribe.bind(shared.signals.mensaje);
+      shared.signals.mensaje.subscribe = (fn, sig) => originalSubscribe((v) => { notifyCount++; fn(v); }, sig);
+
+      let mounts = 0;
+      let unmounts = 0;
+      let clicks = 0;
+
+      class PropertyCard extends HomlyComponent {
+        get globalStores() { return [shared]; }
+        get template() {
+          return () => '<span class="msg" data-bind="mensaje"></span> '
+            + '<button class="ver" data-action="ver">ver</button>';
+        }
+        get actions() { return { ver: () => { clicks++; } }; }
+        onMount() { mounts++; }
+        onUnmount() { unmounts++; }
+      }
+      customElements.define('lifecycle-card', PropertyCard);
+
+      const N = 24;
+      const cards = [];
+      for (let i = 0; i < N; i++) {
+        const el = document.createElement('lifecycle-card');
+        el.id = 'card-' + i;
+        stage.appendChild(el);
+        cards.push(el);
+      }
+      await tick(50);
+
+      check('las 24 tarjetas montaron una vez cada una', mounts === N);
+      check('ninguna se desmontó todavía', unmounts === 0);
+
+      // Baseline: un cambio del store global, con N tarjetas vivas, notifica N veces.
+      notifyCount = 0;
+      shared.state.mensaje = 'cambio-1';
+      check('un cambio del store global dispara exactamente 1 efecto por tarjeta (antes de mover)',
+        notifyCount === N);
+
+      // 10 "reordenamientos": mover el primer hijo al final, repetidas veces. Un move
+      // (appendChild de un nodo ya conectado) dispara disconnectedCallback+connectedCallback
+      // SINCRÓNICOS en el mismo tick — exactamente el caso que rompía sin el fix.
+      for (let r = 0; r < 10; r++) {
+        stage.appendChild(stage.firstElementChild);
+      }
+      await tick(30);
+
+      check('reordenar no dispara más montajes', mounts === N);
+      check('reordenar no dispara ningún desmontaje', unmounts === 0);
+
+      notifyCount = 0;
+      shared.state.mensaje = 'cambio-2';
+      check('tras 10 reordenamientos, el store global sigue notificando exactamente N veces (no hay fuga)',
+        notifyCount === N);
+
+      // Una acción disparada con un click REAL corre una sola vez (no N veces, si hubiera
+      // listeners de dispatcher duplicados por un remount fantasma).
+      clicks = 0;
+      await real.click('#' + cards[0].id + ' .ver');
+      await tick();
+      check('una acción real corre exactamente una vez tras los reordenamientos', clicks === 1);
+
+      // Desmontar de verdad: ahora sí tiene que dispararse onUnmount para cada una.
+      for (const el of cards) el.remove();
+      await tick(30);
+      check('sacarlas del DOM de verdad SÍ dispara onUnmount, una vez cada una', unmounts === N);
+
+      notifyCount = 0;
+      shared.state.mensaje = 'cambio-3';
+      check('con todo desmontado, el store global ya no notifica a nadie', notifyCount === 0);
+    }
+
+    // ============================================================================
+    // FIX CORE-1/ROUTER-1 (moveBefore): connectedMoveCallback existe y no hace nada
+    // raro — solo confirma que la clase lo declara (opta a moveBefore()).
+    // ============================================================================
+    {
+      const el = document.createElement('lifecycle-card');
+      check('HomlyComponent define connectedMoveCallback (opt-in a Element.moveBefore)',
+        typeof el.connectedMoveCallback === 'function');
+    }
+
+    // ============================================================================
+    // FIX CORE-11/ROUTER-6: si el elemento se saca del DOM MIENTRAS la plantilla
+    // está en camino, ni onMount ni los bindings deben correr sobre un nodo muerto.
+    // ============================================================================
+    {
+      const original = Homly.loadTemplate;
+      let resolveTemplate;
+      Homly.loadTemplate = () => new Promise((res) => { resolveTemplate = res; });
+
+      let slowMounted = false;
+      class SlowCard extends HomlyComponent {
+        get templateUrl() { return '/no-importa.html'; }
+        onMount() { slowMounted = true; }
+      }
+      customElements.define('lifecycle-slow-card', SlowCard);
+
+      const el = document.createElement('lifecycle-slow-card');
+      stage.appendChild(el);          // dispara connectedCallback → _hydrate → await pendiente
+      await tick();                    // deja que arranque y quede colgado en el await
+      el.remove();                     // lo sacan del DOM mientras carga
+      resolveTemplate('<p>contenido</p>');
+      await tick(30);
+
+      check('onMount nunca corrió: se sacó del DOM antes de que la plantilla llegara', !slowMounted);
+      check('tampoco escribió el DOM del elemento ya desconectado', el.innerHTML === '');
+
+      Homly.loadTemplate = original;
+    }
+
+    // ============================================================================
+    // Un remontaje REAL (sacado y vuelto a meter más tarde, con signal ya abortado)
+    // sí tiene que re-hidratar desde cero.
+    // ============================================================================
+    {
+      let mounts = 0;
+      class RemountCard extends HomlyComponent {
+        get template() { return () => '<span>hola</span>'; }
+        onMount() { mounts++; }
+      }
+      customElements.define('lifecycle-remount-card', RemountCard);
+
+      const el = document.createElement('lifecycle-remount-card');
+      stage.appendChild(el);
+      await tick(20);
+      check('primer montaje', mounts === 1);
+
+      el.remove();
+      await tick(20);   // deja correr el teardown diferido (queueMicrotask)
+
+      stage.appendChild(el);   // esto SÍ es un remontaje real: el controller viejo ya abortó
+      await tick(20);
+      check('un remontaje real después de un remove+wait sí vuelve a montar', mounts === 2);
+    }
+
+    // ============================================================================
+    // Idea #8 (islas): evento `homly:hydrated` y promesa `el.ready`, ambos después
+    // de onMount/onActivate — no antes.
+    // ============================================================================
+    {
+      let onMountRanBeforeEvent = null;
+      let onMountRanBeforeReady = null;
+      class ReadyCard extends HomlyComponent {
+        get template() { return () => '<span>hola</span>'; }
+        onMount() { this._mounted2 = true; }
+      }
+      customElements.define('lifecycle-ready-card', ReadyCard);
+
+      const el = document.createElement('lifecycle-ready-card');
+      let hydratedEvent = false;
+      el.addEventListener('homly:hydrated', () => { hydratedEvent = true; onMountRanBeforeEvent = el._mounted2 === true; });
+      stage.appendChild(el);
+
+      await el.ready;
+      onMountRanBeforeReady = el._mounted2 === true;
+      check('el.ready se resuelve', true);
+      check('...después de que onMount ya corrió', onMountRanBeforeReady);
+      check('homly:hydrated se disparó', hydratedEvent);
+      check('...también después de onMount', onMountRanBeforeEvent);
+    }
+
+    // --- el.ready también se resuelve si la hidratación falla (no cuelga para siempre) --
+    {
+      class FallaCard extends HomlyComponent {
+        get templateUrl() { return '/no-existe-de-verdad-tampoco.html'; }
+      }
+      customElements.define('lifecycle-falla-card', FallaCard);
+      const el = document.createElement('lifecycle-falla-card');
+      stage.appendChild(el);
+
+      let resolved = false;
+      el.ready.then(() => { resolved = true; });
+      await tick(60);
+      check('el.ready se resuelve igual cuando la hidratación falla (no cuelga para siempre)', resolved);
+    }
+  });
+</script>

@@ -1,6 +1,6 @@
 /**
  * Checks para Homly._itemFor — la resolución de "¿de qué fila salió este click?".
- * Lo que se puede romper acá no es obvio: que gane la fila más cercana (listas
+ * Lo que se puede romper aquí no es obvio: que gane la fila más cercana (listas
  * anidadas), que un click fuera de toda lista devuelva undefined en vez de la última
  * fila registrada, y que el propio nodo de la fila cuente como su propia fila.
  *

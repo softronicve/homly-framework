@@ -1,0 +1,103 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — oráculo de conformidad SSR (renderers/homly.php ↔ homly.js)</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, real } from './_harness.js';
+
+  /** Comparación profunda simple — alcanza para state.json (JSON puro, sin ciclos). */
+  const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  // Un solo componente genérico: la "forma" del store la da el propio state.json de
+  // cada fixture (Homly.initial solo deja pasar claves ya declaradas en los defaults,
+  // así que los defaults se arman con las mismas claves, en null).
+  class ConformanceHost extends HomlyComponent {
+    get store() {
+      return (this._store ??= Homly.createStore(Homly.initial(this, this._defaults)));
+    }
+    // Único action name que usan los fixtures interactivos (ver combined-card-list).
+    get actions() {
+      return { fav: (_t, ctx) => { if (ctx.item) ctx.item.state.fav = !ctx.item.state.fav; } };
+    }
+  }
+  customElements.define('conformance-host', ConformanceHost);
+
+  window.__homly_results = runChecks('conformance', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    let fixtures;
+    try {
+      fixtures = await fetch('../../conformance/fixtures/index.json').then((r) => r.json());
+    } catch (err) {
+      check('conformance/fixtures/index.json existe y es JSON válido (correr antes: php conformance/run.php)', false);
+      return;
+    }
+    check('hay al menos 20 fixtures (§1.3 de v1.10)', fixtures.length >= 20);
+
+    for (const fx of fixtures) {
+      const base = '../../conformance/fixtures/' + fx.name + '/';
+      const [html, state] = await Promise.all([
+        fetch(base + 'expected.html').then((r) => r.text()),
+        fetch(base + 'state.json').then((r) => r.json()),
+      ]);
+
+      // Un fragment (::fragment(), sin isla) no se hidrata solo — vive embebido en una
+      // página o componente cuyo store ya lo cubre. Sin isla no hay de dónde sembrar un
+      // store propio, así que aquí solo se confirma que el texto pintado coincide con
+      // state.json; no se monta como componente (evitaría el punto: bindear un store
+      // recién creado, sin la isla, pisaría el texto ya renderizado con valores vacíos).
+      if (fx.mode === 'fragment') {
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        const matches = Object.entries(state).every(([k, v]) => {
+          const bound = div.querySelector('[data-bind="' + k + '"]');
+          return bound && bound.textContent === (v == null ? '' : String(v));
+        });
+        check(fx.name + ': el fragmento trae el estado pintado en el texto (sin isla)', matches);
+        continue;
+      }
+
+      const el = document.createElement('conformance-host');
+      el.setAttribute('data-homly-ssr', '');
+      // defaults: mismas claves que el state, en null — Homly.initial las sobreescribe
+      // todas desde el <script data-homly-state> que trae expected.html.
+      el._defaults = Object.fromEntries(Object.keys(state).map((k) => [k, null]));
+      el.innerHTML = html;
+
+      const rowsBefore = [...el.querySelectorAll('[data-homly-key]')];
+      const observer = new MutationObserver(() => {});
+      observer.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+
+      stage.appendChild(el);
+      await tick(30);
+
+      const mutations = observer.takeRecords();
+      check(fx.name + ': 0 mutaciones de filas al hidratar', mutations.length === 0);
+
+      const rowsAfter = [...el.querySelectorAll('[data-homly-key]')];
+      check(fx.name + ': las filas son los mismos nodos (identidad)',
+        rowsAfter.length === rowsBefore.length && rowsAfter.every((n, i) => n === rowsBefore[i]));
+
+      const liveState = { ...el._store.state };
+      check(fx.name + ': estado leído del DOM == state.json', deepEqual(liveState, state));
+
+      if (fx.action) {
+        const target = el.querySelector(fx.action.selector);
+        check(fx.name + ': existe el target de la interacción', target != null);
+        if (target) {
+          const row = target.closest('[data-homly-key]');
+          const itemStore = Homly.listItems.get(row);
+          check(fx.name + ': arranca en el valor "before"', itemStore?.state[fx.action.field] === fx.action.before);
+          await real.click(fx.action.selector);
+          await tick(20);
+          check(fx.name + ': la interacción funciona (llega a "after")', itemStore?.state[fx.action.field] === fx.action.after);
+        }
+      }
+
+      el.remove();   // limpio antes del próximo fixture: nada de selectores/ids que choquen
+    }
+  });
+</script>

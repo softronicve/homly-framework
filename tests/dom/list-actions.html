@@ -1,0 +1,152 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — T4: contexto del ítem en las acciones</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.
+  (Migrado de <code>tests/index.html</code> a T0.)</p>
+<div id="sandbox"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick, real } from './_harness.js';
+
+  window.__homly_results = runChecks('list-actions', async (check, tick) => {
+    const sandbox = document.getElementById('sandbox');
+
+    class ListaDemo extends HomlyComponent {
+      get store() {
+        return (this._store ??= Homly.createStore({
+          items: [{ id: 1, titulo: 'uno' }, { id: 2, titulo: 'dos' }, { id: 3, titulo: 'tres' }],
+          ultimo: null,
+        }));
+      }
+      get template() {
+        return () => `
+          <template data-for="items" data-key="id">
+            <article><span data-bind="titulo"></span> <button data-action="borrar">x</button></article>
+          </template>
+          <button data-action="fuera" id="fuera">fuera de la lista</button>`;
+      }
+      get actions() {
+        const s = this.store;
+        return {
+          borrar: (_t, ctx) => {
+            s.state.ultimo = ctx.item.state.id;
+            s.state.items = s.state.items.filter((i) => i.id !== ctx.item.state.id);
+          },
+          fuera: (_t, ctx) => { s.state.ultimo = 'item' in ctx ? 'TIENE-ITEM' : 'sin-item'; },
+        };
+      }
+    }
+    customElements.define('lista-demo-t4', ListaDemo);
+
+    const host = document.createElement('lista-demo-t4');
+    host.id = 'host';
+    sandbox.appendChild(host);
+    await tick(50);
+
+    const titulos = () => [...host.querySelectorAll('article span')].map((s) => s.textContent);
+    check('renderiza las 3 filas', titulos().join(',') === 'uno,dos,tres');
+
+    await real.click('#host article:nth-of-type(2) button');
+    await tick();
+    check('la acción recibe el ítem de SU fila', host._store.state.ultimo === 2);
+    check('borra la fila correcta', titulos().join(',') === 'uno,tres');
+
+    await real.click('#host article:nth-of-type(2) button');   // ahora es "tres"
+    await tick();
+    check('sigue resolviendo bien después de reordenar', host._store.state.ultimo === 3);
+    check('queda una sola fila', titulos().join(',') === 'uno');
+
+    await real.click('#fuera');
+    await tick();
+    check('una acción fuera de data-for no recibe item', host._store.state.ultimo === 'sin-item');
+
+    // --- FIX CORE-25a: un target ya "is-loading" ignora un segundo click -------------
+    {
+      let ejecuciones = 0;
+      let resolver;
+      class Concurrencia extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({})); }
+        // Un <div>, no un <button>: si fuera un control nativo, `disabled = true` (que ya
+        // pone el dispatcher) alcanzaría solo para bloquear el 2º click y el guard nuevo
+        // no se estaría probando en absoluto.
+        get template() { return () => '<div data-action="lenta" id="lenta">ir</div>'; }
+        get actions() {
+          return {
+            lenta: () => { ejecuciones++; return new Promise((r) => { resolver = r; }); },
+          };
+        }
+      }
+      customElements.define('concurrencia-demo', Concurrencia);
+      const host2 = document.createElement('concurrencia-demo');
+      host2.id = 'host2';
+      sandbox.appendChild(host2);
+      await tick();
+
+      await real.click('#host2 #lenta');
+      await real.click('#host2 #lenta');
+      await real.click('#host2 #lenta');
+      await tick();
+      check('3 clicks rápidos sobre una acción async en vuelo corren la acción una sola vez',
+        ejecuciones === 1);
+
+      resolver();
+      await tick();
+      await real.click('#host2 #lenta');
+      await tick();
+      check('una vez que termina, un nuevo click sí dispara otra corrida', ejecuciones === 2);
+      resolver();
+    }
+
+    // --- FIX CORE-17: data-loading-text restaura los NODOS originales, no solo texto --
+    {
+      let resolver;
+      class GuardarDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({})); }
+        get template() {
+          return () => '<button data-action="guardar" data-loading-text="Guardando…" id="btn-guardar">'
+            + '<svg id="icono" width="8" height="8"></svg><span>Guardar</span></button>';
+        }
+        get actions() {
+          return { guardar: () => new Promise((r) => { resolver = r; }) };
+        }
+      }
+      customElements.define('guardar-demo', GuardarDemo);
+      const host3 = document.createElement('guardar-demo');
+      host3.id = 'host3';
+      sandbox.appendChild(host3);
+      await tick();
+
+      await real.click('#host3 #btn-guardar');
+      await tick();
+      const btn = host3.querySelector('#btn-guardar');
+      check('mientras carga, el texto es el de data-loading-text', btn.textContent === 'Guardando…');
+
+      resolver();
+      await tick();
+      check('al terminar, vuelve el texto original', btn.textContent === 'Guardar');
+      check('y el ícono (nodo real, no solo texto) sigue ahí', btn.querySelector('#icono') !== null);
+    }
+
+    // --- FIX CORE-20/PROTO-1: data-action="constructor" no llama a Object -----------
+    {
+      class ConstructorDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ tocado: false })); }
+        get template() { return () => '<button data-action="constructor" id="btn-ctor">x</button>'; }
+        get actions() { return { real: () => { this.store.state.tocado = true; } }; }
+      }
+      customElements.define('constructor-demo', ConstructorDemo);
+      const host4 = document.createElement('constructor-demo');
+      host4.id = 'host4';
+      sandbox.appendChild(host4);
+      await tick();
+
+      let threw = false;
+      try {
+        await real.click('#host4 #btn-ctor');
+        await tick();
+      } catch { threw = true; }
+      check('data-action="constructor" no ejecuta nada ni revienta', !threw && host4._store.state.tocado === false);
+    }
+  });
+</script>

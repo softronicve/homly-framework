@@ -6,7 +6,7 @@
  *
  * ponytail: homly.js declara `class HomlyComponent extends HTMLElement`, que no existe
  * en Node. Un stub de una línea alcanza para importar el módulo; matchRoute es puro y
- * no toca el DOM, que es justo por lo que se puede testear acá.
+ * no toca el DOM, que es justo por lo que se puede testear aquí.
  */
 import assert from 'node:assert/strict';
 
@@ -45,6 +45,16 @@ assert.deepEqual(matchRoute('/buscar/:q', '/buscar/dos%20palabras'), { q: 'dos p
 // --- un valor de la URL no se interpreta como patrón --------------------------
 assert.deepEqual(matchRoute('/blog/:slug', '/blog/:otro'), { slug: ':otro' });
 
+// --- FIX ROUTER-4/ROUTE-1: un '%' suelto no rompe el matcheo, cae a "no matchea" -----
+// decodeURIComponent('%zz') lanza URIError; sin el try/catch, esto tiraba abajo toda la
+// navegación en vez de simplemente no matchear (y caer al 404, como cualquier otra ruta).
+assert.equal(matchRoute('/blog/:slug', '/blog/%zz'), null, "un '%' suelto no lanza: no matchea");
+assert.doesNotThrow(() => matchRoute('/blog/:slug', '/blog/100%'));
+
+// --- FIX ROUTER-4: un '/' codificado en el param no cuela un segmento extra ---------
+assert.equal(matchRoute('/blog/:slug', '/blog/a%2Fb'), null,
+  "'%2F' decodifica a '/': un solo :slug no puede esconder dos segmentos");
+
 // --- prioridad de resolución --------------------------------------------------
 // ponytail: _resolve solo lee this.routes, así que se prueba sin DOM salteando el
 // constructor (que sí toca document/window).
@@ -70,6 +80,25 @@ assert.equal(router._resolve('/nada/de/nada').route.tag, 'not-found', 'cae al /4
 const bare = Object.create(HomlyRouter.prototype);
 bare.routes = { '/blog/:slug': { tag: 'blog-post', loader: null } };
 assert.equal(bare._resolve('/otra').route.tag, 'div');
+
+// --- FIX ROUTER-4/ROUTER-12: la barra final y '/index.html' matchean igual ----------
+assert.equal(router._resolve('/blog/').route.tag, 'blog-index', "'/blog/' matchea como '/blog'");
+assert.equal(router._resolve('/blog/index.html').route.tag, 'blog-index');
+assert.equal(router._resolve('/blog/nuevo/').route.tag, 'blog-new', 'también en una ruta dinámica-vs-estática');
+assert.equal(HomlyRouter._normalize('/'), '/', 'la raíz se deja como está');
+assert.equal(HomlyRouter._normalize('///'), '/', 'nunca queda vacía');
+
+// --- FIX ROUTER-23: una ruta llamada 'constructor' no matchea por el prototipo -------
+assert.equal(router._resolve('constructor').route.tag, 'not-found',
+  "'constructor' no es una clave propia de this.routes: Object.hasOwn no la confunde con la del prototipo");
+assert.equal(router._resolve('toString').route.tag, 'not-found');
+
+// --- FIX ROUTER-9/ROUTER-19: el constructor valida que el root exista ---------------
+{
+  globalThis.document = { getElementById: () => null };
+  assert.throws(() => new HomlyRouter('no-existe-este-id'), /no existe.*no-existe-este-id/,
+    'sin el elemento raíz, el constructor lanza en vez de fallar más tarde en otro método');
+}
 
 // --- prefetch: una vez por ruta, y solo si tiene loader ------------------------
 {
@@ -138,4 +167,4 @@ assert.equal(bare._resolve('/otra').route.tag, 'div');
   await new Promise((res) => setTimeout(res, 0));   // que la rejection se resuelva sin unhandled
 }
 
-console.log('✓ route-match: 37 checks OK');
+console.log('✓ route-match: 45 checks OK');

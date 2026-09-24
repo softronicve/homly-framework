@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — estilos: hoja compartida por tag (CSP-1), opt-out inline, @scope fallback (#9)</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  window.__homly_results = runChecks('styles', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // ============================================================================
+    // FIX CSP-1/PERF-11 (default): una sola hoja por CLASE de componente, vía
+    // document.adoptedStyleSheets — nada de <style> dentro del componente.
+    // ============================================================================
+    {
+      class SharedCard extends HomlyComponent {
+        get styles() { return 'p { color: rgb(10, 20, 30); }'; }
+        get template() { return () => '<p id="txt">hola</p>'; }
+      }
+      customElements.define('shared-card', SharedCard);
+
+      const a = document.createElement('shared-card');
+      stage.append(a);
+      await tick();
+      // Contamos DESPUÉS de la 1ª instancia (que también instala la hoja base
+      // [data-if][hidden] una única vez): lo que importa es que la 2ª NO sume nada.
+      const afterFirst = document.adoptedStyleSheets.length;
+
+      const b = document.createElement('shared-card');
+      stage.append(b);
+      await tick();
+
+      check('no hay ningún <style> DENTRO del componente (default: shared, no inline)',
+        a.querySelector('style[data-homly-scope]') == null);
+      check('el estilo igual se aplica', getComputedStyle(a.querySelector('#txt')).color === 'rgb(10, 20, 30)');
+      check('la 2ª instancia de la MISMA clase no suma una hoja nueva (una por tag, no por instancia)',
+        document.adoptedStyleSheets.length === afterFirst);
+      check('...pero también se ve estilada (comparte la hoja de la 1ª)',
+        getComputedStyle(b.querySelector('#txt')).color === 'rgb(10, 20, 30)');
+    }
+
+    // ============================================================================
+    // FIX P13/CSP-1: [data-if][hidden]{display:none!important} instalado una sola vez,
+    // así el CSS propio de un componente (@scope, alta especificidad) no puede tumbarlo.
+    // ============================================================================
+    {
+      class IfCard extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ visible: false })); }
+        // Un selector de baja especificidad que, sin la regla base, competiría con
+        // [hidden] y a veces ganaría dentro de @scope.
+        get styles() { return 'p { display: flex; }'; }
+        get template() { return () => '<p data-if="visible" id="p2">condicional</p>'; }
+      }
+      customElements.define('if-card', IfCard);
+      const el = document.createElement('if-card');
+      stage.appendChild(el);
+      await tick();
+      check('[data-if][hidden] gana: el párrafo oculto no se muestra pese al CSS propio',
+        getComputedStyle(el.querySelector('#p2')).display === 'none');
+    }
+
+    // ============================================================================
+    // renderError: sin `style=` inline, texto configurable por Homly.messages.
+    // ============================================================================
+    {
+      const original = Homly.messages.loadError;
+      Homly.messages = { ...Homly.messages, loadError: 'no se pudo, che' };
+      class Rota extends HomlyComponent {
+        get templateUrl() { return '/no-existe-de-verdad.html'; }
+      }
+      customElements.define('rota-card', Rota);
+      const el = document.createElement('rota-card');
+      stage.appendChild(el);
+      await tick(60);
+
+      const box = el.querySelector('[data-homly-error]');
+      check('renderError no escribe un style= inline', box != null && box.getAttribute('style') == null);
+      check('el texto sale de Homly.messages.loadError', box.textContent === 'no se pudo, che');
+      Homly.messages = { ...Homly.messages, loadError: original };
+    }
+
+    // ============================================================================
+    // Opt-out: Homly.styleMode = 'inline' vuelve al <style> por INSTANCIA de 1.9.
+    // ============================================================================
+    Homly.styleMode = 'inline';
+    try {
+      // Con soporte de @scope (el caso normal): se usa @scope como hasta ahora.
+      {
+        class ScopedNormal extends HomlyComponent {
+          get styles() { return 'p { color: rgb(0, 128, 0); }'; }
+          get template() { return () => '<p id="txt">hola</p>'; }
+        }
+        customElements.define('styles-normal', ScopedNormal);
+        const el = document.createElement('styles-normal');
+        stage.appendChild(el);
+        await tick();
+
+        const styleTag = el.querySelector('style[data-homly-scope]');
+        const hasScopeSupport = typeof CSSScopeRule !== 'undefined';
+        check('styleMode inline: con soporte de @scope, se sigue usando @scope',
+          !hasScopeSupport || styleTag.textContent.includes('@scope'));
+        if (hasScopeSupport) {
+          check('y el estilo se aplica', getComputedStyle(el.querySelector('#txt')).color === 'rgb(0, 128, 0)');
+        }
+      }
+
+      // FIX ROUTER-8: sin CSSScopeRule (navegador sin soporte de @scope), envolver en
+      // `tag { … }` (selector nesting) en vez de dejar el CSS sin escopar / roto.
+      {
+        const hadOwn = Object.prototype.hasOwnProperty.call(globalThis, 'CSSScopeRule');
+        const original = globalThis.CSSScopeRule;
+        delete globalThis.CSSScopeRule;   // simula un navegador sin soporte de @scope
+
+        try {
+          class ScopedFallback extends HomlyComponent {
+            get styles() { return 'p { color: rgb(255, 0, 0); }'; }
+            get template() { return () => '<p id="txt">hola</p>'; }
+          }
+          customElements.define('styles-fallback', ScopedFallback);
+          const el = document.createElement('styles-fallback');
+          stage.appendChild(el);
+          await tick();
+
+          const styleTag = el.querySelector('style[data-homly-scope]');
+          check('sin CSSScopeRule, envuelve el CSS en el tag como selector (nesting)',
+            styleTag.textContent.includes('styles-fallback {'));
+          check('y NO usa @scope si no hay soporte', !styleTag.textContent.includes('@scope'));
+          check('el estilo igual se aplica con el fallback',
+            getComputedStyle(el.querySelector('#txt')).color === 'rgb(255, 0, 0)');
+        } finally {
+          if (hadOwn) globalThis.CSSScopeRule = original;
+        }
+      }
+    } finally {
+      Homly.styleMode = null;
+    }
+  });
+</script>

@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — FIX PERF-2: data-for con LIS + moveBefore, conteo de operaciones DOM</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola. Cuenta
+  operaciones DOM reales (no tiempos, para no tener un test inestable — ver
+  <code>tasks/auditoria-2026-09/fase1/perf.md</code>, PERF-2).</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  window.__homly_results = runChecks('reconcile', async (check, tick) => {
+    const stage = document.getElementById('stage');
+    const N = 1000;
+    const make = () => Array.from({ length: N }, (_, i) => ({ id: i + 1 }));
+
+    class BigList extends HomlyComponent {
+      get store() { return (this._store ??= Homly.createStore({ items: make() })); }
+      get template() {
+        return () => '<ul><template data-for="items" data-key="id"><li data-bind="id"></li></template></ul>';
+      }
+    }
+    customElements.define('big-list', BigList);
+    const el = document.createElement('big-list');
+    stage.appendChild(el);
+    await tick(60);
+
+    check('renderiza las 1000 filas', el.querySelectorAll('li').length === N);
+
+    // Instrumentar SOLO el <ul> de esta lista (no el prototipo global), contando
+    // moveBefore/insertBefore reales que homly hace durante la reconciliación.
+    const ul = el.querySelector('ul');
+    let moves = 0, inserts = 0;
+    const origMove = ul.moveBefore ? ul.moveBefore.bind(ul) : null;
+    const origInsert = ul.insertBefore.bind(ul);
+    if (origMove) ul.moveBefore = (node, ref) => { moves++; return origMove(node, ref); };
+    ul.insertBefore = (node, ref) => { inserts++; return origInsert(node, ref); };
+    const reset = () => { moves = 0; inserts = 0; };
+
+    check('Element.moveBefore existe en este navegador (si no, el test de abajo mide el fallback)',
+      typeof ul.moveBefore === 'function');
+
+    // --- swap del primero y el último: la LIS deja quietos los 998 del medio --------
+    {
+      const items = el._store.state.items;
+      const swapped = [items[N - 1], ...items.slice(1, N - 1), items[0]];
+      reset();
+      el._store.state.items = swapped;
+      await tick(60);
+
+      check('swap de 1.000 filas: exactamente 2 movimientos (LIS deja quietas las 998 del medio)',
+        moves + inserts === 2);
+      const lis = el.querySelectorAll('li');
+      check('el DOM quedó realmente en el orden nuevo (primera fila = id 1000)', lis[0].textContent === '1000');
+      check('...y la última = id 1', lis[N - 1].textContent === '1');
+    }
+
+    // --- borrar una sola fila: 0 movimientos, solo un remove ------------------------
+    {
+      const items = el._store.state.items;
+      const withoutMiddle = items.filter((it) => it.id !== 500);
+      reset();
+      el._store.state.items = withoutMiddle;
+      await tick(60);
+
+      check('borrar 1 fila del medio: 0 movimientos (el resto ya estaba en orden creciente)',
+        moves + inserts === 0);
+      check('queda una fila menos', el.querySelectorAll('li').length === N - 1);
+      check('la fila borrada ya no está', [...el.querySelectorAll('li')].every((li) => li.textContent !== '500'));
+    }
+
+    ul.insertBefore = origInsert;
+    if (origMove) ul.moveBefore = origMove;
+  });
+</script>

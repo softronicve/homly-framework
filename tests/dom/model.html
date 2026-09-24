@@ -1,0 +1,209 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — data-model por tipo (#13, CORE-3) y otros bindings</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  /** `el.click()` ejecuta las mismas activation steps que un click real (marca el
+   *  checkbox/radio y dispara 'input'/'change'), así que alcanza sin pasar por CDP. */
+  const clic = (el) => el.click();
+  /** Escribe un valor y dispara el evento que data-model escucha para ese control. */
+  const escribir = (el, value, evt = 'input') => {
+    el.value = value;
+    el.dispatchEvent(new Event(evt, { bubbles: true }));
+  };
+
+  window.__homly_results = runChecks('model', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    // --- radios: uno marcado según el store; marcar otro escribe su value ----------
+    {
+      class OrdenDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ orden: 'precio' })); }
+        get template() {
+          return () => ''
+            + '<input type="radio" name="orden" value="fecha" data-model="orden" id="r-fecha">'
+            + '<input type="radio" name="orden" value="precio" data-model="orden" id="r-precio">';
+        }
+      }
+      customElements.define('orden-demo', OrdenDemo);
+      const el = document.createElement('orden-demo');
+      stage.appendChild(el);
+      await tick();
+
+      check('el radio que matchea el store arranca marcado',
+        el.querySelector('#r-precio').checked === true && el.querySelector('#r-fecha').checked === false);
+
+      clic(el.querySelector('#r-fecha'));
+      await tick();
+      check('marcar el otro radio escribe su value en el store', el._store.state.orden === 'fecha');
+      check('y el radio anterior se desmarca solo (son inputs nativos)',
+        el.querySelector('#r-precio').checked === false);
+    }
+
+    // --- number: castea a Number solo si el default ya era number; '' -> null -------
+    {
+      class PrecioDemo extends HomlyComponent {
+        get store() {
+          return (this._store ??= Homly.createStore({ base: 750, extra: 50, nota: '' }));
+        }
+        get template() {
+          return () => ''
+            + '<input type="number" data-model="base" id="n-base">'
+            + '<input type="number" data-model="extra" id="n-extra">'
+            + '<input type="text" data-model="nota" id="t-nota">';
+        }
+      }
+      customElements.define('precio-demo', PrecioDemo);
+      const el = document.createElement('precio-demo');
+      stage.appendChild(el);
+      await tick();
+
+      escribir(el.querySelector('#n-base'), '750');
+      escribir(el.querySelector('#n-extra'), '50');
+      await tick();
+      check('los dos inputs number castean a número real, no concatenan strings',
+        el._store.state.base + el._store.state.extra === 800
+        && typeof el._store.state.base === 'number' && typeof el._store.state.extra === 'number');
+
+      escribir(el.querySelector('#n-base'), '');
+      await tick();
+      check("vaciar un number da null, no Number('') === 0", el._store.state.base === null);
+
+      escribir(el.querySelector('#t-nota'), '123');
+      await tick();
+      check('un input de texto (default string) no castea aunque el valor parezca numérico',
+        el._store.state.nota === '123' && typeof el._store.state.nota === 'string');
+    }
+
+    // --- select multiple: ida y vuelta con array -------------------------------------
+    {
+      class TiposDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ tipos: ['casa'] })); }
+        get template() {
+          return () => '<select multiple data-model="tipos" id="sel-tipos">'
+            + '<option value="casa">Casa</option>'
+            + '<option value="apto">Apto</option>'
+            + '<option value="local">Local</option>'
+            + '</select>';
+        }
+      }
+      customElements.define('tipos-demo', TiposDemo);
+      const el = document.createElement('tipos-demo');
+      stage.appendChild(el);
+      await tick();
+
+      const sel = el.querySelector('#sel-tipos');
+      check('arranca con "casa" seleccionado según el store',
+        [...sel.options].find((o) => o.value === 'casa').selected === true
+        && [...sel.options].find((o) => o.value === 'apto').selected === false);
+
+      [...sel.options].forEach((o) => { o.selected = o.value === 'casa' || o.value === 'apto'; });
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await tick();
+      check("seleccionar 'casa' y 'apto' escribe ['casa','apto'] en el store",
+        JSON.stringify(el._store.state.tipos) === JSON.stringify(['casa', 'apto']));
+    }
+
+    // --- grupo de checkboxes: array, no boolean --------------------------------------
+    {
+      class AmenidadesDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ amenidades: [] })); }
+        get template() {
+          return () => ''
+            + '<input type="checkbox" data-model="amenidades" value="piscina" id="c-piscina">'
+            + '<input type="checkbox" data-model="amenidades" value="gym" id="c-gym">';
+        }
+      }
+      customElements.define('amenidades-demo', AmenidadesDemo);
+      const el = document.createElement('amenidades-demo');
+      stage.appendChild(el);
+      await tick();
+
+      clic(el.querySelector('#c-piscina'));
+      await tick();
+      check("marcar 'piscina' da ['piscina']", JSON.stringify(el._store.state.amenidades) === '["piscina"]');
+
+      clic(el.querySelector('#c-gym'));
+      await tick();
+      check("marcar 'gym' también agrega, no reemplaza",
+        JSON.stringify([...el._store.state.amenidades].sort()) === JSON.stringify(['gym', 'piscina']));
+
+      clic(el.querySelector('#c-piscina'));
+      await tick();
+      check("desmarcar 'piscina' la saca del array", JSON.stringify(el._store.state.amenidades) === '["gym"]');
+    }
+
+    // --- una sola checkbox boolean sigue funcionando como antes ----------------------
+    {
+      class BoolDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ conFoto: false })); }
+        get template() { return () => '<input type="checkbox" data-model="conFoto" id="c-foto">'; }
+      }
+      customElements.define('bool-demo', BoolDemo);
+      const el = document.createElement('bool-demo');
+      stage.appendChild(el);
+      await tick();
+
+      clic(el.querySelector('#c-foto'));
+      await tick();
+      check('un checkbox suelto (default boolean) sigue dando true/false', el._store.state.conFoto === true);
+    }
+
+    // --- FIX CORE-21: null no se pinta como "null" -----------------------------------
+    {
+      class NuloDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ precio: 100 })); }
+        get template() { return () => '<span id="precio" data-bind="precio"></span>'; }
+      }
+      customElements.define('nulo-demo', NuloDemo);
+      const el = document.createElement('nulo-demo');
+      stage.appendChild(el);
+      await tick();
+      el._store.state.precio = null;
+      await tick();
+      check('un valor null renderiza vacío, no el texto "null"', el.querySelector('#precio').textContent === '');
+    }
+
+    // --- FIX CORE-15a: boolean en data-bind-attr sigue la semántica HTML nativa ------
+    {
+      class BoolAttrDemo extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ off: false, ariaOff: false })); }
+        get template() {
+          return () => ''
+            + '<button id="btn" data-bind-attr="disabled:off">x</button>'
+            + '<div id="reg" data-bind-attr="aria-hidden:ariaOff">y</div>';
+        }
+      }
+      customElements.define('boolattr-demo', BoolAttrDemo);
+      const el = document.createElement('boolattr-demo');
+      stage.appendChild(el);
+      await tick();
+
+      check('false en un atributo boolean normal empieza sin el atributo',
+        el.querySelector('#btn').hasAttribute('disabled') === false);
+
+      el._store.state.off = true;
+      await tick();
+      check("true escribe '' (atributo boolean presente)", el.querySelector('#btn').getAttribute('disabled') === '');
+
+      el._store.state.off = false;
+      await tick();
+      check('false vuelve a QUITAR el atributo (disabled="false" en HTML seguiría deshabilitando)',
+        el.querySelector('#btn').hasAttribute('disabled') === false);
+
+      el._store.state.ariaOff = true;
+      await tick();
+      check("aria-* con true escribe el string 'true'", el.querySelector('#reg').getAttribute('aria-hidden') === 'true');
+
+      el._store.state.ariaOff = false;
+      await tick();
+      check("aria-* con false escribe el string 'false' (no se quita, ARIA lo necesita explícito)",
+        el.querySelector('#reg').getAttribute('aria-hidden') === 'false');
+    }
+  });
+</script>

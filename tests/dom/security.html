@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — data-bind-attr allowlist de URL (#22, BIND-1/CORE-16)</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.</p>
+<div id="stage"></div>
+
+<script type="module">
+  import { Homly, HomlyComponent } from '../../homly.js';
+  import { runChecks, tick } from './_harness.js';
+
+  window.__homly_results = runChecks('security', async (check, tick) => {
+    const stage = document.getElementById('stage');
+
+    window.__pwned = 0;
+    window.__homPwn = () => { window.__pwned++; };
+
+    class CardX extends HomlyComponent {
+      get store() {
+        return (this._store ??= Homly.createStore({ url: '', onattr: '', srcdocv: '' }));
+      }
+      get template() {
+        return () => ''
+          + '<a id="lnk" data-bind-attr="href:url">ir</a>'
+          + '<img id="img" data-bind-attr="src:url">'
+          + '<div id="ev" data-bind-attr="onclick:onattr">x</div>'
+          + '<iframe id="frame" data-bind-attr="srcdoc:srcdocv"></iframe>';
+      }
+    }
+    customElements.define('security-card', CardX);
+    const el = document.createElement('security-card');
+    stage.appendChild(el);
+    await tick();
+    const s = el._store;
+
+    // --- javascript: se bloquea, en cualquier atributo de URL ---------------------
+    s.state.url = 'javascript:window.__homPwn()';
+    await tick();
+    check('href con javascript: se bloquea (no se escribe el atributo)',
+      el.querySelector('#lnk').getAttribute('href') === null);
+
+    s.state.url = 'JavaScript:window.__homPwn()';   // mayúsculas: el esquema no distingue caso
+    await tick();
+    check('el bloqueo no distingue mayúsculas/minúsculas en el esquema',
+      el.querySelector('#lnk').getAttribute('href') === null);
+
+    s.state.url = 'javascript:window.__homPwn()';
+    await tick();
+    check('src con javascript: también se bloquea', el.querySelector('#img').getAttribute('src') === null);
+
+    // --- vbscript: también se bloquea ----------------------------------------------
+    s.state.url = 'vbscript:msgbox(1)';
+    await tick();
+    check('vbscript: se bloquea', el.querySelector('#lnk').getAttribute('href') === null);
+
+    // --- esquemas seguros pasan -----------------------------------------------------
+    s.state.url = 'https://ok.example/casa/1';
+    await tick();
+    check('https:// pasa sin tocar', el.querySelector('#lnk').getAttribute('href') === 'https://ok.example/casa/1');
+
+    s.state.url = 'mailto:agente@ejemplo.com';
+    await tick();
+    check('mailto: pasa', el.querySelector('#lnk').getAttribute('href') === 'mailto:agente@ejemplo.com');
+
+    s.state.url = 'tel:+58123456789';
+    await tick();
+    check('tel: pasa', el.querySelector('#lnk').getAttribute('href') === 'tel:+58123456789');
+
+    // --- ruta relativa: pasa (se resuelve contra el propio origen) -----------------
+    s.state.url = '/casa/42';
+    await tick();
+    check('una ruta relativa (sin esquema) pasa en href', el.querySelector('#lnk').getAttribute('href') === '/casa/42');
+
+    s.state.url = 'img/foto.jpg';
+    await tick();
+    check('una ruta relativa sin barra inicial también pasa',
+      el.querySelector('#lnk').getAttribute('href') === 'img/foto.jpg');
+
+    // --- data:image/ solo en src, no en href ---------------------------------------
+    s.state.url = 'data:image/png;base64,AAAA';
+    await tick();
+    check('data:image/ pasa en src (puede renderizar una foto, no ejecuta nada)',
+      el.querySelector('#img').getAttribute('src') === 'data:image/png;base64,AAAA');
+
+    s.state.url = 'data:image/png;base64,AAAA';
+    await tick();
+    check('el mismo data:image/ NO pasa en href (solo tiene sentido en src)',
+      el.querySelector('#lnk').getAttribute('href') === null);
+
+    s.state.url = 'data:text/html,<script>window.__homPwn()<\/script>';
+    await tick();
+    check('data:text/html (no image/) se bloquea incluso en src', el.querySelector('#img').getAttribute('src') === null);
+
+    // --- on* y srcdoc: denylist puro, nunca se escriben -----------------------------
+    s.state.onattr = 'window.__homPwn()';
+    await tick();
+    check('un atributo on* nunca se escribe, sea cual sea el valor',
+      el.querySelector('#ev').getAttribute('onclick') === null);
+
+    s.state.srcdocv = '<script>window.__homPwn()<\/script>';
+    await tick();
+    check('srcdoc nunca se escribe', el.querySelector('#frame').getAttribute('srcdoc') === null);
+
+    // --- nada de lo anterior debía haber ejecutado código real ---------------------
+    check('nada de esto ejecutó código real (__pwned sigue en 0)', window.__pwned === 0);
+
+    // --- un atributo que NO es de URL sigue sin filtro (comportamiento previo) -----
+    {
+      class PlainAttr extends HomlyComponent {
+        get store() { return (this._store ??= Homly.createStore({ cls: '' })); }
+        get template() { return () => '<span id="s" data-bind-attr="data-info:cls"></span>'; }
+      }
+      customElements.define('security-plain', PlainAttr);
+      const el2 = document.createElement('security-plain');
+      stage.appendChild(el2);
+      await tick();
+      el2._store.state.cls = 'javascript:no-es-una-url-aca';   // el atributo no es de URL: no se filtra
+      await tick();
+      check('un atributo que no es de URL no pasa por el allowlist',
+        el2.querySelector('#s').getAttribute('data-info') === 'javascript:no-es-una-url-aca');
+    }
+  });
+</script>

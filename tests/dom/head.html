@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>homly — T5: Homly.head</title>
+<p>Ver la consola / <code>npm run test:browser</code>. Esta página corre sola.
+  (Migrado de <code>tests/index.html</code> a T0.)</p>
+
+<script type="module">
+  import { Homly } from '../../homly.js';
+  import { runChecks } from './_harness.js';
+
+  window.__homly_results = runChecks('head', async (check) => {
+    const meta = (attr, key) => document.head.querySelectorAll(`meta[${attr}="${key}"]`);
+
+    Homly.head({ title: 'Primero', description: 'uno', 'og:image': '/a.png' });
+    check('setea el título', document.title === 'Primero');
+    check('crea el meta description', meta('name', 'description')[0]?.content === 'uno');
+    check('og: usa property, no name', meta('property', 'og:image')[0]?.content === '/a.png');
+
+    Homly.head({ title: 'Segundo', description: 'dos' });
+    check('actualiza el título', document.title === 'Segundo');
+    check('no duplica el meta al repetir', meta('name', 'description').length === 1);
+    check('actualiza el contenido', meta('name', 'description')[0].content === 'dos');
+
+    Homly.head({ description: '' });
+    check('un valor vacío borra el tag', meta('name', 'description').length === 0);
+
+    Homly.head({ description: 'tres' });
+    check('y se puede volver a crear', meta('name', 'description')[0].content === 'tres');
+
+    // --- FIX ROUTER-21: canonical y jsonld tienen su propio tag, no un <meta> --------
+    Homly.head({ canonical: 'https://homly.dev/blog/uno' });
+    const canonical = () => document.head.querySelector('link[rel="canonical"]');
+    check('canonical crea un <link rel=canonical>', canonical()?.href === 'https://homly.dev/blog/uno');
+
+    Homly.head({ canonical: 'https://homly.dev/blog/dos' });
+    check('...y lo actualiza en vez de duplicarlo', document.head.querySelectorAll('link[rel="canonical"]').length === 1);
+
+    Homly.head({ canonical: '' });
+    check('un canonical vacío borra el <link>', canonical() == null);
+
+    const jsonldTag = () => document.head.querySelector('script[data-homly-head="jsonld"]');
+    Homly.head({ jsonld: { '@type': 'BlogPosting', headline: 'Uno' } });
+    check('jsonld crea un <script type=application/ld+json>',
+      jsonldTag()?.type === 'application/ld+json' && JSON.parse(jsonldTag().textContent).headline === 'Uno');
+
+    Homly.head({ jsonld: { '@type': 'BlogPosting', headline: 'Dos' } });
+    check('...y lo actualiza sin duplicarlo',
+      document.head.querySelectorAll('script[data-homly-head="jsonld"]').length === 1
+      && JSON.parse(jsonldTag().textContent).headline === 'Dos');
+
+    // --- article:/product:/profile:/fb: también van como "property" -----------------
+    Homly.head({ 'article:author': 'Ana' });
+    check('article: se escribe como property, igual que og:', meta('property', 'article:author')[0]?.content === 'Ana');
+
+    // --- FIX HEAD-1: una clave con comillas no rompe el selector ---------------------
+    // (ojo: el helper `meta()` de arriba interpola la clave SIN escapar — a propósito
+    // no se usa para esta clave, porque construiría el mismo selector inválido que
+    // HEAD-1 describe. Se busca a mano, filtrando por el atributo real.)
+    const byName = (name) => [...document.head.querySelectorAll('meta[name]')].find((m) => m.getAttribute('name') === name);
+    let threw = false;
+    try {
+      Homly.head({ 'raro"clave': 'x' });
+    } catch { threw = true; }
+    check('una clave con comillas no lanza (CSS.escape en el selector)', !threw);
+    check('...y el <meta> se crea con el nombre real (comilla incluida)', byName('raro"clave')?.content === 'x');
+
+    Homly.head({ 'raro"clave': 'y' });
+    const withThatName = [...document.head.querySelectorAll('meta[name]')].filter((m) => m.getAttribute('name') === 'raro"clave');
+    check('...y se puede volver a encontrar/actualizar la misma, sin duplicarla',
+      withThatName.length === 1 && withThatName[0].content === 'y');
+  });
+</script>
